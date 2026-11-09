@@ -1,22 +1,11 @@
-"""
-TP1 - Étape 1 : anonymisation des données
-    - regex  : URL + adresses e-mail
-    - NER    : prénoms (spaCy, entités PERSON) confirmés par un dictionnaire de
-               prénoms (gender-guesser, ~40 000 prénoms internationaux)
-
-Pré-requis : pip install pandas spacy gender-guesser
-             python -m spacy download en_core_web_sm
-Usage      : python anonymisation.py
-Entrée     : data_train/train.csv, data_eval/val.csv, data_test/test_index_text.csv
-Sortie     : data_anon/<même nom>.csv  (colonne "message" anonymisée)
-"""
-
+import ipaddress
 import re
 from collections import Counter
 from pathlib import Path
 
 import gender_guesser.detector as gender
 import pandas as pd
+import phonenumbers
 import spacy
 
 # ---------------------------------------------------------------------------
@@ -29,11 +18,69 @@ EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-zA-Z]{2,}")
 # URL :
 #   - commençant par http:// , https:// ou www.
 #   - OU domaine nu avec une extension connue (ex : twitch.tv/xxx, youtube.com)
+#   Après "www." on exige un vrai domaine ("www.site.com"), sinon "Awww... show"
+#   serait pris pour une URL. Le port éventuel (":31040") fait partie de l'URL.
 URL_RE = re.compile(
-    r"(?:https?://|www\.)\S+"
-    r"|\b[\w-]+(?:\.[\w-]+)*\.(?:com|net|org|tv|gg|io|fr|ru|pl|de|eu|cz|ua|be)\b(?:/\S*)?",
+    r"(?:https?://\S+|www\.[\w-]+\.\S+)"
+    r"|\b[\w-]+(?:\.[\w-]+)*\.(?:com|net|org|tv|gg|io|fr|ru|pl|de|eu|cz|ua|be)\b"
+    r"(?::\d{2,5})?(?:/\S*)?",
     re.IGNORECASE,
 )
+
+# Adresse IPv4 : 4 nombres de 0 à 255 séparés par des points (ex : 192.168.1.10)
+# Chaque nombre est contrôlé par la regex pour éviter "999.999.999.999".
+OCTET = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
+IPV4_RE = re.compile(rf"(?<![\d.]){OCTET}(?:\.{OCTET}){{3}}(?![\d.])")
+
+# Adresse IPv6 : groupes hexadécimaux séparés par ":" (ex : 2001:db8::1).
+# La regex attrape des CANDIDATS ; on valide ensuite avec le module standard
+# ipaddress, pour ne pas confondre avec une heure comme "12:30:45".
+IPV6_CANDIDAT_RE = re.compile(r"(?<![\w:])[0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7}(?![\w:])")
+
+
+def remplacer_ipv6(match):
+    candidat = match.group(0)
+    # Un smiley comme "D::D:D" est une IPv6 techniquement valide (D est un
+    # chiffre hexadécimal). Une vraie adresse contient au moins un chiffre.
+    if not re.search(r"\d", candidat):
+        return candidat
+    try:
+        ipaddress.IPv6Address(candidat)
+        return "<IP>"
+    except ValueError:
+        return candidat          # pas une vraie IPv6 -> on laisse le texte
+
+
+# ---------------------------------------------------------------------------
+# 1 bis. Numéros de téléphone (bibliothèque phonenumbers = libphonenumber de Google)
+# ---------------------------------------------------------------------------
+# Une regex maison attraperait "9999999999" ou des dates. phonenumbers connaît
+# les plans de numérotation de chaque pays et vérifie que le numéro est valide.
+#   - REGIONS : pays utilisés pour interpréter les numéros SANS indicatif
+#     (ex : "06 12 34 56 78" n'est valide qu'en France). Les numéros avec
+#     indicatif (+33, +7, +1...) sont reconnus quelle que soit la région.
+#   - STRICT_GROUPING : les chiffres doivent être groupés comme un vrai numéro.
+#     Ça élimine les faux positifs du dataset (une date "05.05.2023 0",
+#     une suite "62 65 6565 95").
+REGIONS_TEL = ["FR", "GB", "US", "DE", "PL", "RU"]
+
+
+def anonymiser_telephones(texte: str) -> str:
+    """Remplace les numéros de téléphone valides par <PHONE>."""
+    positions = set()
+    for region in REGIONS_TEL:
+        for m in phonenumbers.PhoneNumberMatcher(
+            texte, region, leniency=phonenumbers.Leniency.STRICT_GROUPING
+        ):
+            positions.add((m.start, m.end))
+    # Remplacement en partant de la fin ; on saute les détections qui se
+    # chevauchent (le même numéro trouvé via deux régions)
+    fin_precedente = len(texte) + 1
+    for debut, fin in sorted(positions, key=lambda p: (-p[0], -p[1])):
+        if fin <= fin_precedente:
+            texte = texte[:debut] + "<PHONE>" + texte[fin:]
+            fin_precedente = debut
+    return texte
 
 # ---------------------------------------------------------------------------
 # 2. NER spaCy (prénoms)
@@ -51,30 +98,30 @@ nlp = spacy.load("en_core_web_sm", disable=["parser", "lemmatizer"])
 # si elle répond "unknown", le mot n'est pas un prénom connu.
 detecteur_prenoms = gender.Detector()
 
-# Mots à ne jamais remplacer, même s'ils sont dans le dictionnaire de prénoms :
-#   - noms de chars / mots du jeu
-#   - mots courants qui sont aussi des prénoms
-#   - personnalités publiques (cibles de haine politique, pas des personnes
-#     privées du dataset -> on garde le signal)
-# À COMPLÉTER après lecture des exemples AVANT/APRÈS affichés par le script.
-EXCLUSIONS = {
-    # chars / jeu
-    "leo", "lee", "emil", "rudy", "grant", "jackson", "sherman", "patton",
-    "lorraine", "kunze", "chaffee", "pershing", "churchill", "matilda",
-    "valentine", "archer", "ferdinand", "walker", "sheridan", "lynx",
-    # mots courants
-    "max", "will", "mark", "rose", "guy", "nick", "may", "art", "don", "bill",
-    "pat", "ray", "joy", "hope", "grace", "frank", "chase", "dean", "drew",
-    "jack", "jesus", "god", "noble", "royal", "ace", "king",
-    # personnalités publiques
-    "putin", "vladimir", "stalin", "hitler", "zelensky",
-}
+# Problème constaté en test : gender-guesser contient des prénoms du monde entier,
+# dont beaucoup sont aussi des mots courants ("you", "the", "are", "can", "arty",
+# "win", "man"...). Deux filtres supplémentaires :
+#   1) les mots outils (stop words) de spaCy ne sont jamais des prénoms ;
+#   2) un mot présent dans beaucoup de messages du corpus est du vocabulaire
+#      (ou du jargon du jeu : "arty", "lowe", "manti"), pas le prénom d'une
+#      personne précise. Le seuil est un compromis à justifier dans le rapport.
+SEUIL_FREQUENCE = 10          # nb de messages au-delà duquel un mot est "courant"
+FREQ_CORPUS = Counter()       # rempli par calculer_frequences() avant l'anonymisation
+
+
+def calculer_frequences(messages):
+    """Compte, pour chaque mot (en minuscules), le nombre de messages qui le contiennent."""
+    FREQ_CORPUS.clear()
+    for m in messages:
+        FREQ_CORPUS.update(set(re.findall(r"\w+", str(m).lower())))
 
 
 def est_prenom(token) -> bool:
-    """Vrai si le token est un prénom connu du dictionnaire et non exclu."""
+    """Vrai si le token est un prénom connu du dictionnaire et pas un mot courant."""
     mot = token.lower_
-    if mot in EXCLUSIONS or not token.is_alpha or len(mot) < 3:
+    if not token.is_alpha or len(mot) < 3:
+        return False
+    if token.is_stop or FREQ_CORPUS[mot] >= SEUIL_FREQUENCE:
         return False
     # gender-guesser attend une majuscule initiale : "vlad" -> "Vlad"
     return detecteur_prenoms.get_gender(mot.capitalize()) != "unknown"
@@ -82,21 +129,19 @@ def est_prenom(token) -> bool:
 
 def anonymiser_ner(doc):
     """
-    Remplace les prénoms détectés dans un Doc spaCy par <PERSON>.
+    Remplace les prénoms par <PERSON>.
 
-    Deux cas :
-      a) spaCy trouve une entité PERSON qui contient un prénom du dictionnaire
-         -> on remplace le prénom ET les noms propres qui l'accompagnent
-            ("John Smith" -> "<PERSON>")
-      b) spaCy ne trouve rien (fréquent en minuscules : "its vlad lol")
-         mais le mot est dans le dictionnaire -> on le remplace quand même
+    spaCy trouve une entité PERSON qui contient un prénom du dictionnaire
+    -> on remplace le prénom ET les noms propres qui l'accompagnent
+       ("John Smith" -> "<PERSON>")
+    Si spaCy ne détecte rien (fréquent en minuscules : "its vlad lol"),
+    le prénom n'est PAS remplacé : limite assumée du NER.
 
-    Retourne : (texte anonymisé, liste des entités PERSON rejetées)
+    Retourne : (texte anonymisé, entités PERSON rejetées)
     """
-    a_remplacer = set()   # indices des tokens à remplacer
-    rejetees = []         # entités PERSON de spaCy non confirmées (pour le rapport)
+    a_remplacer = set()      # indices des tokens à remplacer
+    rejetees = []            # détections spaCy non confirmées (pour le rapport)
 
-    # a) entités détectées par le NER
     for ent in doc.ents:
         if ent.label_ != "PERSON":
             continue
@@ -107,18 +152,13 @@ def anonymiser_ner(doc):
         else:
             rejetees.append(ent.text)
 
-    # b) prénoms ratés par le NER
-    for t in doc:
-        if est_prenom(t):
-            a_remplacer.add(t.i)
-
     # Reconstruction du texte en partant de la fin (les positions restent valides)
     texte = doc.text
     for i in sorted(a_remplacer, reverse=True):
         t = doc[i]
         texte = texte[: t.idx] + "<PERSON>" + texte[t.idx + len(t.text):]
     # "<PERSON> <PERSON>" -> "<PERSON>" (prénom + nom = une seule personne)
-    texte = re.sub(r"<PERSON>(\s+<PERSON>)+", "<PERSON>", texte)
+    texte = re.sub(r"<PERSON>(\s*<PERSON>)+", "<PERSON>", texte)
     return texte, rejetees
 
 
@@ -127,11 +167,13 @@ def anonymiser_ner(doc):
 # ---------------------------------------------------------------------------
 
 def anonymiser_regex(texte: str) -> str:
-    """Remplace les e-mails et les URL par une balise générique."""
+    """Remplace e-mails, URL, IP et téléphones par une balise générique."""
     texte = str(texte)
-    # L'e-mail en premier : sinon "jean@gmail.com" serait pris en partie pour une URL
     texte = EMAIL_RE.sub("<EMAIL>", texte)
-    texte = URL_RE.sub("<URL>", texte)
+    texte = URL_RE.sub("<URL>", texte)          # une URL contenant une IP part ici
+    texte = IPV4_RE.sub("<IP>", texte)
+    texte = IPV6_CANDIDAT_RE.sub(remplacer_ipv6, texte)
+    texte = anonymiser_telephones(texte)        # après IP : 192.168.1.10 n'est pas un tél.
     return texte
 
 
@@ -151,15 +193,29 @@ def anonymiser_serie(messages):
 # ---------------------------------------------------------------------------
 
 FICHIERS = [
-    "data_train/train.csv",
-    "data_eval/val.csv",
-    "data_test/test_index_text.csv",
+    "data_train/train_raw.csv",
+    "data_eval/val_raw.csv",
 ]
-DOSSIER_SORTIE = Path("data_anon")
+
+
+def chemin_sortie(chemin_entree: str) -> Path:
+    """data_eval/val_raw.csv -> data_eval/val_anon.csv (même dossier)."""
+    entree = Path(chemin_entree)
+    sortie = entree.with_name(entree.name.replace("_raw", "_anon"))
+    # Sécurité : on refuse d'écraser le fichier source
+    if sortie.resolve() == entree.resolve():
+        raise ValueError(f"Le fichier de sortie écraserait la source : {entree}")
+    return sortie
 
 if __name__ == "__main__":
-    DOSSIER_SORTIE.mkdir(exist_ok=True)
     total_rejetees = Counter()
+
+    # Fréquence des mots sur TOUT le corpus (train + val), utilisée pour ne pas
+    # prendre un mot courant ou du jargon du jeu pour un prénom.
+    # Les CSV sont seulement LUS ici ; ils ne sont jamais modifiés.
+    calculer_frequences(
+        pd.concat([pd.read_csv(f)["message"] for f in FICHIERS])
+    )
 
     for chemin in FICHIERS:
         df = pd.read_csv(chemin)
@@ -169,21 +225,19 @@ if __name__ == "__main__":
         # Comparaison avant / après
         modifies = df[df["message"] != df["message_anon"]]
         print(f"\n=== {chemin} : {len(modifies)} messages modifiés sur {len(df)}")
-        for balise in ["<EMAIL>", "<URL>", "<PERSON>"]:
+        for balise in ["<EMAIL>", "<URL>", "<IP>", "<PHONE>", "<PERSON>"]:
             print(f"  {balise:9}:", modifies["message_anon"].str.count(balise).sum())
         for avant, apres in modifies[["message", "message_anon"]].head(10).values:
             print(f"  AVANT : {avant}\n  APRÈS : {apres}\n")
 
         # Sauvegarde : on remplace la colonne d'origine par la version anonymisée
         df["message"] = df["message_anon"]
-        df.drop(columns="message_anon").to_csv(
-            DOSSIER_SORTIE / Path(chemin).name, index=False
-        )
+        sortie = chemin_sortie(chemin)
+        df.drop(columns="message_anon").to_csv(sortie, index=False)
+        print(f"  -> écrit : {sortie}")
 
     # Justification du filtrage : ce que spaCy seul aurait remplacé à tort
     print("\n=== Entités PERSON de spaCy REJETÉES (non confirmées par le dictionnaire)")
     print(f"  {sum(total_rejetees.values())} détections rejetées, top 25 :")
     for mot, n in total_rejetees.most_common(25):
         print(f"    {n:4}  {mot}")
-
-    print(f"\nFichiers anonymisés écrits dans {DOSSIER_SORTIE}/")
