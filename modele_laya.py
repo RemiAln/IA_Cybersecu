@@ -1,20 +1,8 @@
-"""
-TP1 - Étape 2 : modèle de décision (Laya)
-
-Pré-requis : pip install laya
-Usage      : python modele_laya.py
-Sortie     : modeles/laya/          (modèle entraîné)
-             resultats/laya.json    (précision, rappel, F1, temps)
-"""
-
 import json
 import os
 from pathlib import Path
-
 os.environ.setdefault("USE_TF", "0")   # évite un blocage connu au chargement (doc Laya)
-
 import numpy as np
-
 import laya
 from laya.train import TrainConfig, finetune, resolve_checkpoint_dir
 
@@ -62,8 +50,8 @@ if __name__ == "__main__":
     train, valid, test = charger_donnees()
 
     # 1. Sous-ensembles tirés au hasard, en gardant la répartition des notes
-    echantillon = train.groupby("label", group_keys=False).apply(
-        lambda g: g.sample(frac=min(1, NB_EXEMPLES_TRAIN / len(train)), random_state=42))
+    echantillon = train.groupby("label").sample(
+        frac=min(1, NB_EXEMPLES_TRAIN / len(train)), random_state=42)
     Path("modeles").mkdir(exist_ok=True)
     preparer_jsonl(echantillon, "modeles/laya_train.jsonl")
     preparer_jsonl(valid.sample(min(NB_EXEMPLES_VALID, len(valid)), random_state=42),

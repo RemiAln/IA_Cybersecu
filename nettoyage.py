@@ -1,16 +1,3 @@
-"""
-TP1 - Étape 2 : nettoyage des textes (balises, casse, ponctuation, emojis)
-
-Un seul nettoyage, appliqué à tout le dataset et utilisé par les 3 modèles.
-
-Pré-requis : pip install pandas
-Usage      : python nettoyage.py
-Entrée     : data_train/train_anon.csv, data_eval/val_anon.csv   (LECTURE SEULE)
-Sortie     : data_train/train_clean.csv, data_eval/val_clean.csv
-             (colonne "message" nettoyée, index et label inchangés,
-              messages devenus vides supprimés)
-"""
-
 import re
 from pathlib import Path
 

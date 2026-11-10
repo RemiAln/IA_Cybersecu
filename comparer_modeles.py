@@ -13,11 +13,7 @@ COLONNES = [
     ("modele", "Modèle"),
     ("precision", "Précision"),
     ("rappel", "Rappel"),
-    ("f1", "F1"),
-    ("f1_macro_6_notes", "F1 macro (6 notes)"),
-    ("erreur_moyenne_score", "Erreur moy. score /100"),
-    ("temps_par_message_ms", "Temps / message (ms)"),
-    ("materiel", "Matériel"),
+    ("temps_execution_s", "Temps d'exécution (s)"),
 ]
 
 resultats = [json.loads(p.read_text(encoding="utf-8"))
@@ -27,7 +23,7 @@ if not resultats:
 
 lignes = ["| " + " | ".join(titre for _, titre in COLONNES) + " |",
           "|" + "---|" * len(COLONNES)]
-for r in sorted(resultats, key=lambda r: -r["f1"]):
+for r in sorted(resultats, key=lambda r: r["modele"]):
     lignes.append("| " + " | ".join(str(r.get(cle, "")) for cle, _ in COLONNES) + " |")
 
 tableau = "\n".join(lignes)
