@@ -1,0 +1,12 @@
+{
+  "modele": "bert",
+  "precision": 0.6473,
+  "rappel": 0.8335,
+  "f1": 0.7287,
+  "f1_macro_6_notes": 0.426,
+  "erreur_moyenne_score": 5.54,
+  "temps_total_s": 3.7,
+  "temps_par_message_ms": 0.697,
+  "nb_messages_test": 5302,
+  "materiel": "cpu"
+}
