@@ -14,7 +14,7 @@ PAIRES = [
     ("data_train/train_raw.csv", "data_train/train_anon.csv"),
     ("data_eval/val_raw.csv", "data_eval/val_anon.csv"),
 ]
-BALISES = ["<EMAIL>", "<URL>", "<IP>", "<PHONE>", "<PERSON>"]
+BALISES = ["<EMAIL>", "<URL>", "<IP>", "<PHONE>", "<USER_", "<PERSON>"]
 NB_EXEMPLES = 10   # exemples affichés par balise
 
 # Recherche de données personnelles RESTANTES dans la version anonymisée
@@ -24,6 +24,7 @@ RESIDUS = {
     "url": r"https?://|www\.[\w-]+\.",
     "ipv4": r"\b\d{1,3}(?:\.\d{1,3}){3}\b",
     "téléphone (+indicatif)": r"\+\d{1,3}[\s.-]?\d{2,4}[\s.-]?\d{2,4}[\s.-]?\d{2,4}",
+    "pseudo avec underscore": r"(?<![\w<])[A-Za-z]\w*_\w+",
 }
 
 

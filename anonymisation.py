@@ -1,5 +1,22 @@
+"""
+TP1 - Étape 1 : anonymisation / pseudonymisation du dataset GameTox
+
+Usage : python anonymisation.py      (clé de pseudonymisation : variable PSEUDO_KEY)
+Lit   : data_train/train_raw.csv, data_eval/val_raw.csv
+Écrit : data_train/train_anon.csv, data_eval/val_anon.csv
+
+Ordre des traitements sur chaque message :
+  1. regex          e-mail, URL, IP, téléphone      -> <EMAIL> <URL> <IP> <PHONE>
+  2. pseudos        pseudonymisation par HMAC       -> <USER_xxxxxxxx>
+  3. NER spaCy      prénoms / noms                  -> <PERSON>
+"""
+
+import hashlib
+import hmac
 import ipaddress
+import os
 import re
+import secrets
 from collections import Counter
 from pathlib import Path
 
@@ -7,6 +24,12 @@ import gender_guesser.detector as gender
 import pandas as pd
 import phonenumbers
 import spacy
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # ---------------------------------------------------------------------------
 # 1. Expressions régulières (données à format fixe)
@@ -132,7 +155,7 @@ def anonymiser_ner(doc):
     Remplace les prénoms par <PERSON>.
 
     spaCy trouve une entité PERSON qui contient un prénom du dictionnaire
-    -> on remplace le prénom ET les noms propres qui l'accompagnent
+    -> on remplace le prénom ET le nom propre qui le suit
        ("John Smith" -> "<PERSON>")
     Si spaCy ne détecte rien (fréquent en minuscules : "its vlad lol"),
     le prénom n'est PAS remplacé : limite assumée du NER.
@@ -145,12 +168,20 @@ def anonymiser_ner(doc):
     for ent in doc.ents:
         if ent.label_ != "PERSON":
             continue
-        if any(est_prenom(t) for t in ent):
-            for t in ent:
-                if est_prenom(t) or t.pos_ == "PROPN":
-                    a_remplacer.add(t.i)
-        else:
+        prenoms = [t for t in ent if est_prenom(t)]
+        if not prenoms:
             rejetees.append(ent.text)
+            continue
+        for t in prenoms:
+            a_remplacer.add(t.i)
+            # Le nom de famille est le mot juste après le prénom ("jacek jaworek").
+            # Avant, on remplaçait TOUS les noms propres de l'entité : sur
+            # "tu ecris ce que tu veux", "que" (prénom du dictionnaire) entraînait
+            # la suppression de 6 mots. On se limite maintenant au mot suivant.
+            suivant = doc[t.i + 1] if t.i + 1 < ent.end else None
+            if suivant is not None and suivant.pos_ == "PROPN" and suivant.is_alpha \
+                    and not suivant.is_stop:
+                a_remplacer.add(suivant.i)
 
     # Reconstruction du texte en partant de la fin (les positions restent valides)
     texte = doc.text
@@ -160,6 +191,58 @@ def anonymiser_ner(doc):
     # "<PERSON> <PERSON>" -> "<PERSON>" (prénom + nom = une seule personne)
     texte = re.sub(r"<PERSON>(\s*<PERSON>)+", "<PERSON>", texte)
     return texte, rejetees
+
+
+# ---------------------------------------------------------------------------
+# 2 bis. Pseudos de joueurs -> pseudonymisation
+# ---------------------------------------------------------------------------
+# Un pseudo identifie un joueur de façon indirecte (profil public, chaîne
+# Twitch...) : c'est une donnée personnelle au sens du RGPD. On ne le supprime
+# pas, on le remplace par un code : le même pseudo donne toujours le même code,
+# ce qui garde l'information "c'est le même joueur" pour le modèle.
+# Le code est un HMAC-SHA256 (hash avec clé secrète) : sans la clé, impossible
+# de retrouver le pseudo, même en testant une liste de pseudos connus.
+CLE_PSEUDO = os.environ.get("PSEUDO_KEY", "").encode()
+if not CLE_PSEUDO:
+    CLE_PSEUDO = secrets.token_bytes(32)
+    print("ATTENTION : PSEUDO_KEY non définie, clé aléatoire utilisée "
+          "(les codes changeront à chaque exécution)")
+
+# Trois formes de pseudos repérées dans le chat de World of Tanks :
+#   a) message automatique du jeu, en début de message :
+#      "Pseudo (Char), you are blocking..." ou "Pseudo[CLAN] (Char), ..."
+PSEUDO_CHAR_RE = re.compile(r"^(\w{3,24})(?=(?:\[[^\]]*\])?\s\([^()]{2,30}\))")
+#   b) mention "@Pseudo" (mais pas "f@cking" : il faut un espace ou le début avant)
+PSEUDO_AT_RE = re.compile(r"(?<!\S)@(\w{3,24})")
+#   c) mot avec underscore ("andron_65_1") ou lettres + chiffres ("gregohri1980").
+#      Volontairement étroit : "1D1OT", "B1TCH" (insultes en leet speak) ou
+#      "FV207" (nom de char) ne doivent PAS disparaître.
+PSEUDO_FORME_RE = re.compile(
+    r"(?<![\w<])(?=\w*[A-Za-z])(\w*_\w*|[A-Za-z]{4,}\d{2,})(?!\w)"
+)
+
+
+def code_pseudo(pseudo: str) -> str:
+    empreinte = hmac.new(CLE_PSEUDO, pseudo.lower().encode(), hashlib.sha256)
+    return f"<USER_{empreinte.hexdigest()[:8]}>"
+
+
+def pseudonymiser(texte: str) -> str:
+    """Remplace les pseudos par <USER_xxxxxxxx>."""
+    def remplacer(m, prefixe=""):
+        pseudo = m.group(1)
+        # Un mot fréquent dans le corpus est du vocabulaire ("Arta (M12)"),
+        # pas un pseudo : même seuil que pour les prénoms.
+        # Moins de 4 caractères hors "_" : émoticône ("T_T", "x_X") ou insulte
+        # censurée ("sh_t"), pas un pseudo.
+        if FREQ_CORPUS[pseudo.lower()] >= SEUIL_FREQUENCE or len(pseudo.replace("_", "")) < 4:
+            return m.group(0)
+        return prefixe + code_pseudo(pseudo)
+
+    texte = PSEUDO_AT_RE.sub(lambda m: remplacer(m, "@"), texte)
+    texte = PSEUDO_CHAR_RE.sub(remplacer, texte)
+    texte = PSEUDO_FORME_RE.sub(remplacer, texte)
+    return texte
 
 
 # ---------------------------------------------------------------------------
@@ -178,8 +261,8 @@ def anonymiser_regex(texte: str) -> str:
 
 
 def anonymiser_serie(messages):
-    """Regex puis NER sur une liste de messages. nlp.pipe traite par lots (rapide)."""
-    textes = [anonymiser_regex(m) for m in messages]
+    """Regex, pseudos puis NER sur une liste de messages. nlp.pipe traite par lots."""
+    textes = [pseudonymiser(anonymiser_regex(m)) for m in messages]
     resultats, rejetees = [], Counter()
     for doc in nlp.pipe(textes, batch_size=1000):
         texte, rej = anonymiser_ner(doc)
@@ -225,7 +308,7 @@ if __name__ == "__main__":
         # Comparaison avant / après
         modifies = df[df["message"] != df["message_anon"]]
         print(f"\n=== {chemin} : {len(modifies)} messages modifiés sur {len(df)}")
-        for balise in ["<EMAIL>", "<URL>", "<IP>", "<PHONE>", "<PERSON>"]:
+        for balise in ["<EMAIL>", "<URL>", "<IP>", "<PHONE>", "<USER_", "<PERSON>"]:
             print(f"  {balise:9}:", modifies["message_anon"].str.count(balise).sum())
         for avant, apres in modifies[["message", "message_anon"]].head(10).values:
             print(f"  AVANT : {avant}\n  APRÈS : {apres}\n")
