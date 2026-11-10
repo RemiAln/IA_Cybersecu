@@ -13,7 +13,8 @@ COLONNES = [
     ("modele", "Modèle"),
     ("precision", "Précision"),
     ("rappel", "Rappel"),
-    ("temps_execution_s", "Temps d'exécution (s)"),
+    ("temps_par_requete_ms", "Temps par requête (ms)"),
+    ("materiel", "Matériel"),
 ]
 
 resultats = [json.loads(p.read_text(encoding="utf-8"))
