@@ -1,7 +1,7 @@
 """
 TP1 - Étape 2 : tableau comparatif des modèles
 
-Usage : python comparer_modeles.py
+Usage : python -m model.comparer_modeles     (depuis la racine du projet)
 Lit   : resultats/*.json (écrits par chaque script modele_*.py)
 Écrit : resultats/comparaison.md
 """

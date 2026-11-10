@@ -1,3 +1,6 @@
+# TP1 - Étape 2 : code commun aux 3 modèles (découpage des données, métriques)
+# Ce fichier ne se lance pas seul : il est importé par les scripts de model/.
+
 import json
 import time
 from pathlib import Path

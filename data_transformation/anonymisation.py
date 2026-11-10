@@ -1,3 +1,6 @@
+# TP1 - Étape 1 : anonymisation des données
+# Usage : python -m data_transformation.anonymisation     (depuis la racine du projet)
+
 import hashlib
 import hmac
 import ipaddress

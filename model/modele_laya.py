@@ -1,3 +1,6 @@
+# TP1 - Étape 2 : modèle de décision (Laya)
+# Usage : python -m model.modele_laya     (depuis la racine du projet)
+
 import json
 import os
 from pathlib import Path
@@ -6,7 +9,7 @@ import numpy as np
 import laya
 from laya.train import TrainConfig, finetune, resolve_checkpoint_dir
 
-from evaluation import NB_NOTES, Chrono, charger_donnees, evaluer
+from data_transformation.evaluation import NB_NOTES, Chrono, charger_donnees, evaluer
 
 # ---------------------------------------------------------------------------
 # PARAMÈTRES À MODIFIER
@@ -15,7 +18,7 @@ CHECKPOINT = "multilingual"   # le plus léger des modèles Laya (322 M de param
 LONGUEUR_MAX = 128            # longueur max d'un texte, en tokens
 NB_EXEMPLES_TRAIN = 2000      # nb de messages utilisés pour l'entraînement
 NB_EXEMPLES_VALID = 500       # nb de messages de validation pendant l'entraînement
-EPOCHS = 1                    # nb de passages sur les données d'entraînement
+EPOCHS = 2                   # nb de passages sur les données d'entraînement
 # ---------------------------------------------------------------------------
 
 # Question posée à Laya pour chaque message : une note de 0 à 5

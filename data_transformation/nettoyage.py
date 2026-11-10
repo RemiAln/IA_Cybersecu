@@ -1,3 +1,6 @@
+# TP1 - Étape 2 : nettoyage des textes
+# Usage : python -m data_transformation.nettoyage     (depuis la racine du projet)
+
 import re
 from pathlib import Path
 
