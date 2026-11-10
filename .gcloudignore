@@ -1,6 +1,6 @@
 # Fichiers NON envoyés à Google Cloud lors du déploiement.
 # (Sans ce fichier, gcloud utiliserait le .gitignore, qui exclut modeles/ :
-#  le modèle BERT ne serait pas envoyé et la construction échouerait.)
+#  le modèle ne serait pas envoyé et la construction échouerait.)
 
 .git/
 .venv/
@@ -15,9 +15,11 @@ data_test/
 # Scripts d'entraînement : inutiles pour l'API
 model/
 
-# Seul modeles/bert est nécessaire
-modeles/laya/
+# Seul modeles/laya est nécessaire, sans sa copie de sauvegarde d'entraînement
+modeles/laya/checkpoint_latest/
+modeles/bert/
 modeles/*.jsonl
 modeles/lstm.pt
 resultats/
 *.pdf
+*.zip

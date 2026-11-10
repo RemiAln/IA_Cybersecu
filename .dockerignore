@@ -7,8 +7,10 @@ data_train/
 data_eval/
 data_test/
 model/
-modeles/laya/
+modeles/laya/checkpoint_latest/
+modeles/bert/
 modeles/*.jsonl
 modeles/lstm.pt
 resultats/
 *.pdf
+*.zip

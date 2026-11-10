@@ -25,24 +25,31 @@ spec:
           ports:
             - containerPort: 8080
           # Ressources réservées (requests) et maximum autorisé (limits) par copie.
-          # BERT-Mini + PyTorch CPU tiennent largement dans 1 Go.
+          # Laya (~650 Mo sur disque, plus en mémoire une fois chargé) + PyTorch CPU.
           resources:
             requests:
-              cpu: "500m"          # 0,5 cœur
-              memory: "1Gi"
+              cpu: "1"             # 1 cœur : Laya est lourd en calcul
+              memory: "3Gi"
             limits:
-              memory: "2Gi"
+              memory: "4Gi"
+          # startupProbe : laisse jusqu'à 5 min au pod pour charger Laya avant de
+          # considérer qu'il a planté (30 essais x 10 s)
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 30
           # readinessProbe : le pod ne reçoit du trafic qu'une fois le modèle chargé
           readinessProbe:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 15
             periodSeconds: 10
           # livenessProbe : si l'API ne répond plus, Kubernetes redémarre le pod
           livenessProbe:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 60
             periodSeconds: 20
+            failureThreshold: 3

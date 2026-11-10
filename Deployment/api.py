@@ -2,31 +2,55 @@
 TP1 - Étape 3 : API "Digital Social Score"
 
 Reçoit un texte et renvoie un score de toxicité de 0 à 100, calculé par le
-modèle BERT-Mini entraîné à l'étape 2 (dossier modeles/bert).
+modèle Laya entraîné à l'étape 2 (dossier modeles/laya).
 
-Lancement local : uvicorn Deployment.api:app --reload     (depuis la racine du projet)
+Lancement local : uvicorn Deployment.api:app      (depuis la racine du projet)
 Documentation   : http://127.0.0.1:8000/docs  (page générée automatiquement)
 """
 
+import json
+import os
+
+# Avant d'importer laya : pas de TensorFlow (blocage connu), et aucun accès à
+# Internet pour le modèle (il est déjà dans l'image, rien à télécharger).
+os.environ.setdefault("USE_TF", "0")
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
+import laya
 import numpy as np
-import torch
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from data_transformation.nettoyage import nettoyer
 
-DOSSIER_MODELE = "modeles/bert"   # relatif à la racine du projet (ou /app dans le conteneur)
-LONGUEUR_MAX = 32          # identique à l'entraînement (modele_bert.py)
-SEUIL_TOXIQUE = 0.5        # identique à l'évaluation : P(note >= 1) >= 0.5
+DOSSIER_MODELE = "modeles/laya"   # relatif à la racine du projet (ou /app dans le conteneur)
+LONGUEUR_MAX = 128                # identique à l'entraînement (modele_laya.py)
+SEUIL_TOXIQUE = 0.5               # identique à l'évaluation : P(note >= 1) >= 0.5
+NB_NOTES = 6                      # notes 0 à 5
 
 # ---------------------------------------------------------------------------
 # Chargement du modèle : UNE SEULE FOIS, au démarrage de l'API
-# (le recharger à chaque requête prendrait plusieurs secondes)
+# (~650 Mo : le recharger à chaque requête prendrait trop de temps)
 # ---------------------------------------------------------------------------
-tokenizer = AutoTokenizer.from_pretrained(DOSSIER_MODELE)
-modele = AutoModelForSequenceClassification.from_pretrained(DOSSIER_MODELE)
-modele.eval()
+agent = laya.load(DOSSIER_MODELE, device="cpu")
+
+# La question posée au modèle est relue dans le modèle lui-même (questions.json) :
+# on est certain de poser EXACTEMENT la question apprise à l'entraînement.
+with open(os.path.join(DOSSIER_MODELE, "questions.json"), encoding="utf-8") as f:
+    QUESTIONS = json.load(f)
+ID_QUESTION = next(iter(QUESTIONS))          # "toxicite"
+
+
+def predire(texte: str) -> np.ndarray:
+    """Probabilités des 6 notes (0 à 5) pour un texte déjà nettoyé."""
+    reponse = agent.predict_batch([texte], QUESTIONS, max_len=LONGUEUR_MAX)[0]
+    probas = reponse["answers"][ID_QUESTION]["probabilities"]
+    return np.array([probas[str(k)] for k in range(NB_NOTES)])
+
+
+# Échauffement : le premier calcul est toujours plus lent ; on le fait ici,
+# avant que l'API n'accepte des requêtes.
+predire("gg")
 
 app = FastAPI(
     title="Digital Social Score",
@@ -54,7 +78,7 @@ class Reponse(BaseModel):
 # ---------------------------------------------------------------------------
 @app.get("/health")
 def health():
-    """Vérifie que l'API répond (utilisé par le cloud et les tests de charge)."""
+    """Vérifie que l'API répond (utilisé par Kubernetes et les tests de charge)."""
     return {"statut": "ok"}
 
 
@@ -64,13 +88,10 @@ def score(requete: Requete):
     texte = nettoyer(requete.texte)
 
     # 2. Prédiction : probabilités des 6 notes (0 à 5)
-    entree = tokenizer([texte], truncation=True, max_length=LONGUEUR_MAX,
-                       return_tensors="pt")
-    with torch.no_grad():
-        probas = torch.softmax(modele(**entree).logits, dim=1)[0].numpy()
+    probas = predire(texte)
 
     # 3. Score 0-100 = note moyenne attendue x 20 (même calcul qu'à l'étape 2)
-    score_0_100 = float(probas @ np.arange(len(probas)) * 20)
+    score_0_100 = float(probas @ np.arange(NB_NOTES) * 20)
 
     return Reponse(
         score=round(score_0_100, 1),
