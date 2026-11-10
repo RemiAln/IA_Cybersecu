@@ -7,7 +7,7 @@ from sklearn.metrics import f1_score
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from data_transformation.evaluation import (GRAINE, NB_NOTES, Chrono, charger_donnees, evaluer,
-                        poids_classes)
+                        mesurer_temps_requete, poids_classes)
 
 MODELE_BASE = "google/bert_uncased_L-4_H-256_A-4"   # BERT-Mini
 DOSSIER_MODELE = "modeles/bert"
@@ -82,6 +82,7 @@ if __name__ == "__main__":
 
     # 4. Évaluation du meilleur modèle sur le jeu de test (val_clean.csv)
     modele = AutoModelForSequenceClassification.from_pretrained(DOSSIER_MODELE)
-    with Chrono() as chrono_test:
-        probas = predire(modele, tokenizer, test["message"].tolist())
-    evaluer("bert", test["label"], probas, chrono_test.duree, "cpu")
+    textes_test = test["message"].tolist()
+    probas = predire(modele, tokenizer, textes_test)
+    temps = mesurer_temps_requete(lambda t: predire(modele, tokenizer, [t]), textes_test)
+    evaluer("bert", test["label"], probas, temps, "cpu")

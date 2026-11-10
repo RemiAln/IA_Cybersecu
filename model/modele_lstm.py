@@ -9,8 +9,8 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import f1_score
 
-from data_transformation.evaluation import (GRAINE, NB_NOTES, Chrono, charger_donnees, evaluer,
-                        poids_classes)
+from data_transformation.evaluation import (GRAINE, NB_NOTES, charger_donnees, evaluer,
+                        mesurer_temps_requete, poids_classes)
 
 # Les messages sont déjà nettoyés par nettoyage.py (fichiers *_clean.csv chargés
 # par charger_donnees) : aucun nettoyage supplémentaire ici.
@@ -129,8 +129,8 @@ if __name__ == "__main__":
     Path("modeles").mkdir(exist_ok=True)
     torch.save({"etat": meilleur_etat, "vocab": vocab}, "modeles/lstm.pt")
 
-    # Évaluation sur le test ; le chrono inclut l'encodage des textes, comme dans l'API
-    with Chrono() as c:
-        X_test = encoder(test["message"].tolist(), vocab)
-        probas = predire(modele, X_test)
-    evaluer("lstm", test["label"], probas, c.duree, APPAREIL)
+    # Évaluation sur le test ; le temps mesuré inclut l'encodage du texte, comme dans l'API
+    textes_test = test["message"].tolist()
+    probas = predire(modele, encoder(textes_test, vocab))
+    temps = mesurer_temps_requete(lambda t: predire(modele, encoder([t], vocab)), textes_test)
+    evaluer("lstm", test["label"], probas, temps, APPAREIL)

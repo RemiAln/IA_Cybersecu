@@ -2,6 +2,7 @@
 # Ce fichier ne se lance pas seul : il est importé par les scripts de model/.
 
 import json
+import statistics
 import time
 from pathlib import Path
 
@@ -17,6 +18,7 @@ NB_NOTES = 6                 # notes de toxicité 0 à 5
 # None = tout le jeu d'entraînement.
 NB_EXEMPLES_TRAIN = 5000
 DOSSIER_RESULTATS = Path("resultats")
+NB_REQUETES_TEST = 100       # nb de messages envoyés un par un pour mesurer le temps par requête
 
 
 def charger_donnees():
@@ -71,7 +73,25 @@ def score_toxicite(probas: np.ndarray) -> np.ndarray:
     return probas @ np.arange(NB_NOTES) * (100 / (NB_NOTES - 1))
 
 
-def evaluer(nom: str, labels, probas: np.ndarray, duree_s: float, materiel: str) -> dict:
+def mesurer_temps_requete(predire_un, textes, n=NB_REQUETES_TEST) -> float:
+    """
+    Temps de traitement d'UNE requête, en millisecondes (médiane sur n messages).
+
+    Les messages sont envoyés un par un, comme dans l'API, et non par lots :
+    c'est ce temps que ressent l'utilisateur. On prend la médiane plutôt que la
+    moyenne pour ne pas être faussé par un appel ralenti par Windows.
+    predire_un : fonction qui prend UN texte et renvoie sa prédiction.
+    """
+    predire_un(textes[0])               # échauffement (1er appel plus lent), non compté
+    durees = []
+    for texte in textes[:n]:
+        debut = time.perf_counter()
+        predire_un(texte)
+        durees.append((time.perf_counter() - debut) * 1000)
+    return statistics.median(durees)
+
+
+def evaluer(nom: str, labels, probas: np.ndarray, temps_requete_ms: float, materiel: str) -> dict:
     """
     Calcule les métriques sur le jeu de test et les enregistre dans resultats/<nom>.json.
 
@@ -86,8 +106,9 @@ def evaluer(nom: str, labels, probas: np.ndarray, duree_s: float, materiel: str)
         "modele": nom,
         "precision": round(precision_score(vrai_toxique, predit_toxique, zero_division=0), 4),
         "rappel": round(recall_score(vrai_toxique, predit_toxique, zero_division=0), 4),
-        # temps de prédiction sur tout le jeu de test, en secondes
-        "temps_execution_s": round(duree_s, 2),
+        # temps de traitement d'une requête (un message), en millisecondes
+        "temps_par_requete_ms": round(temps_requete_ms, 2),
+        "materiel": materiel,
     }
     DOSSIER_RESULTATS.mkdir(exist_ok=True)
     (DOSSIER_RESULTATS / f"{nom}.json").write_text(json.dumps(resultats, indent=2,

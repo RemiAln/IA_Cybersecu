@@ -10,7 +10,8 @@ import torch
 import laya
 from laya.train import TrainConfig, finetune, resolve_checkpoint_dir
 
-from data_transformation.evaluation import NB_NOTES, Chrono, charger_donnees, evaluer
+from data_transformation.evaluation import (NB_NOTES, charger_donnees, evaluer,
+                                            mesurer_temps_requete)
 
 # ---------------------------------------------------------------------------
 # PARAMÈTRES À MODIFIER
@@ -90,6 +91,7 @@ if __name__ == "__main__":
 
     # 3. Évaluation sur le jeu de test (val_clean.csv)
     agent = laya.load("modeles/laya", device=APPAREIL)
-    with Chrono() as c:
-        probas = predire(agent, test["message"].tolist())
-    evaluer("laya", test["label"], probas, c.duree, APPAREIL)
+    textes_test = test["message"].tolist()
+    probas = predire(agent, textes_test)
+    temps = mesurer_temps_requete(lambda t: predire(agent, [t]), textes_test)
+    evaluer("laya", test["label"], probas, temps, APPAREIL)
