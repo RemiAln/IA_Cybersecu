@@ -1,3 +1,6 @@
+# TP1 - Étape 2 : modèle statistique (LSTM)
+# Usage : python -m model.modele_lstm     (depuis la racine du projet)
+
 from collections import Counter
 from pathlib import Path
 
@@ -6,7 +9,7 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import f1_score
 
-from evaluation import (GRAINE, NB_NOTES, Chrono, charger_donnees, evaluer,
+from data_transformation.evaluation import (GRAINE, NB_NOTES, Chrono, charger_donnees, evaluer,
                         poids_classes)
 
 # Les messages sont déjà nettoyés par nettoyage.py (fichiers *_clean.csv chargés

@@ -1,0 +1,12 @@
+# Construction de l'image sur Google Cloud Build.
+# Nécessaire car le Dockerfile n'est pas à la racine du projet.
+#
+# Usage (depuis la racine du projet) :
+#   gcloud builds submit --config Deployment/cloudbuild.yaml --substitutions=_IMAGE=<adresse de l'image> .
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "Deployment/Dockerfile", "-t", "${_IMAGE}", "."]
+
+images:
+  - "${_IMAGE}"

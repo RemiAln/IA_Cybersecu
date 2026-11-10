@@ -1,27 +1,12 @@
-"""
-TP1 - Étape 2 : modèle transformer (BERT)
-
-Modèle utilisé : BERT-Mini (google/bert_uncased_L-4_H-256_A-4)
-  - version officielle de Google, 4 couches, 11 millions de paramètres
-    (BERT-base en a 110 millions) -> s'entraîne en une dizaine de minutes sur CPU
-  - "uncased" : n'utilise pas les majuscules, ce qui tombe bien puisque nos
-    textes sont déjà passés en minuscules par nettoyage.py
-  - objectif : obtenir un résultat comparable aux autres modèles en local,
-    pas la meilleure performance possible
-
-Pré-requis : pip install torch transformers scikit-learn numpy pandas
-Usage      : python modele_bert.py
-Entrée     : data_train/train_clean.csv, data_eval/val_clean.csv (via evaluation.py)
-Sortie     : modeles/bert/          (modèle entraîné, réutilisé par l'API)
-             resultats/bert.json    (précision, rappel, F1, temps)
-"""
+# TP1 - Étape 2 : modèle transformer (BERT-Mini)
+# Usage : python -m model.modele_bert     (depuis la racine du projet)
 
 import numpy as np
 import torch
 from sklearn.metrics import f1_score
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from evaluation import (GRAINE, NB_NOTES, Chrono, charger_donnees, evaluer,
+from data_transformation.evaluation import (GRAINE, NB_NOTES, Chrono, charger_donnees, evaluer,
                         poids_classes)
 
 MODELE_BASE = "google/bert_uncased_L-4_H-256_A-4"   # BERT-Mini

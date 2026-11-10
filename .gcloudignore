@@ -1,0 +1,23 @@
+# Fichiers NON envoyés à Google Cloud lors du déploiement.
+# (Sans ce fichier, gcloud utiliserait le .gitignore, qui exclut modeles/ :
+#  le modèle BERT ne serait pas envoyé et la construction échouerait.)
+
+.git/
+.venv/
+__pycache__/
+.env
+
+# RGPD : aucune donnée du dataset ne part dans le cloud
+data_train/
+data_eval/
+data_test/
+
+# Scripts d'entraînement : inutiles pour l'API
+model/
+
+# Seul modeles/bert est nécessaire
+modeles/laya/
+modeles/*.jsonl
+modeles/lstm.pt
+resultats/
+*.pdf

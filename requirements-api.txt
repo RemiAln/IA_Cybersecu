@@ -1,0 +1,8 @@
+# Dépendances de l'API (étape 3) - installées dans le conteneur Docker.
+# torch est installé à part dans le Dockerfile (version CPU, beaucoup plus légère).
+# Versions de transformers identiques à celles utilisées pour entraîner le modèle.
+transformers==5.22.2
+fastapi
+uvicorn
+numpy
+pandas
