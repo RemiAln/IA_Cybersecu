@@ -1,11 +1,3 @@
-"""
-TP1 - Étape 2 : code commun aux trois modèles
-
-- charger_donnees() : même découpage train / validation / test pour tous
-- score_toxicite()  : probabilités des notes 0..5 -> score 0..100
-- evaluer()         : précision, rappel, F1, erreur sur le score, temps
-"""
-
 import json
 import time
 from pathlib import Path
@@ -25,13 +17,15 @@ def charger_donnees():
     """
     Retourne (train, valid, test), trois DataFrames avec "message" et "label" (entier 0-5).
 
-    - test  = data_eval/val_anon.csv, jamais vu pendant l'entraînement :
+    - test  = data_eval/val_clean.csv, jamais vu pendant l'entraînement :
               c'est sur lui qu'on compare les trois modèles.
     - valid = 10 % de data_train, tiré en gardant la proportion de chaque note :
               sert à choisir le meilleur epoch.
     """
-    train = pd.read_csv("data_train/train_anon.csv")
-    test = pd.read_csv("data_eval/val_anon.csv")
+    # Fichiers nettoyés par nettoyage.py. keep_default_na=False : sinon pandas
+    # transforme des messages comme "nan", "null" ou "na" en valeur manquante.
+    train = pd.read_csv("data_train/train_clean.csv", keep_default_na=False)
+    test = pd.read_csv("data_eval/val_clean.csv", keep_default_na=False)
     for df in (train, test):
         df["message"] = df["message"].astype(str)
         df["label"] = df["label"].astype(int)

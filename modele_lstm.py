@@ -1,14 +1,3 @@
-"""
-TP1 - Étape 2 : modèle statistique, LSTM bidirectionnel
-
-Usage : python modele_lstm.py
-Écrit : modeles/lstm.pt, resultats/lstm.json
-
-Le LSTM lit le message mot à mot et garde une "mémoire" de ce qu'il a lu.
-Il part de zéro : il n'apprend que sur nos 38 000 messages d'entraînement,
-contrairement à BERT et Laya qui ont été pré-entraînés sur des milliards de textes.
-"""
-
 from collections import Counter
 from pathlib import Path
 
@@ -19,7 +8,9 @@ from sklearn.metrics import f1_score
 
 from evaluation import (GRAINE, NB_NOTES, Chrono, charger_donnees, evaluer,
                         poids_classes)
-from nettoyage import nettoyer_lstm
+
+# Les messages sont déjà nettoyés par nettoyage.py (fichiers *_clean.csv chargés
+# par charger_donnees) : aucun nettoyage supplémentaire ici.
 
 torch.manual_seed(GRAINE)
 np.random.seed(GRAINE)
@@ -95,7 +86,7 @@ def f1_toxique(labels, probas):
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     train, valid, test = charger_donnees()
-    textes = {nom: df["message"].map(nettoyer_lstm).tolist()
+    textes = {nom: df["message"].tolist()
               for nom, df in [("train", train), ("valid", valid), ("test", test)]}
 
     vocab = construire_vocabulaire(textes["train"])
@@ -135,8 +126,8 @@ if __name__ == "__main__":
     Path("modeles").mkdir(exist_ok=True)
     torch.save({"etat": meilleur_etat, "vocab": vocab}, "modeles/lstm.pt")
 
-    # Évaluation sur le test ; le chrono inclut le nettoyage, comme dans l'API
+    # Évaluation sur le test ; le chrono inclut l'encodage des textes, comme dans l'API
     with Chrono() as c:
-        X_test = encoder(test["message"].map(nettoyer_lstm).tolist(), vocab)
+        X_test = encoder(test["message"].tolist(), vocab)
         probas = predire(modele, X_test)
     evaluer("lstm", test["label"], probas, c.duree, APPAREIL)

@@ -57,9 +57,8 @@ Sans `PSEUDO_KEY`, le script tire une clé au hasard : les codes `<USER_...>` ch
 ```bash
 pip install -r requirements.txt
 python modele_lstm.py               # tourne sur CPU (~1 min)
-python modele_bert.py               # GPU conseillé
-python modele_laya.py zeroshot      # GPU conseillé
-python modele_laya.py finetune      # GPU nécessaire
+python modele_bert.py               # BERT-Mini, tourne sur CPU
+python modele_laya.py               # fine-tuning réduit (paramètres en haut du fichier)
 python comparer_modeles.py
 ```
 

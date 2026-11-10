@@ -1,80 +1,112 @@
 """
-TP1 - Étape 2 : nettoyage des textes avant l'entraînement
+TP1 - Étape 2 : nettoyage des textes (balises, casse, ponctuation, emojis)
 
-Deux niveaux de nettoyage, selon le modèle :
-  - nettoyer_lstm()        : nettoyage fort (minuscules, ponctuation retirée),
-                             car le LSTM apprend sur un vocabulaire de mots entiers.
-  - nettoyer_transformer() : nettoyage léger, car BERT et Laya ont leur propre
-                             tokenizer et tirent du sens des majuscules et de la
-                             ponctuation ("STOP!!!" n'est pas "stop").
+Un seul nettoyage, appliqué à tout le dataset et utilisé par les 3 modèles.
+
+Pré-requis : pip install pandas
+Usage      : python nettoyage.py
+Entrée     : data_train/train_anon.csv, data_eval/val_anon.csv   (LECTURE SEULE)
+Sortie     : data_train/train_clean.csv, data_eval/val_clean.csv
+             (colonne "message" nettoyée, index et label inchangés,
+              messages devenus vides supprimés)
 """
 
-import html
 import re
+from pathlib import Path
 
-import emoji
+import pandas as pd
 
-# Balises posées à l'étape 1. Le code d'un pseudo (<USER_3f2a9c1e>) n'apporte
-# rien au modèle : on garde seulement l'information "un joueur est visé".
-USER_RE = re.compile(r"<USER_[0-9a-f]{8}>")
+FICHIERS = [
+    "data_train/train_anon.csv",
+    "data_eval/val_anon.csv",
+]
 
-# Dans le fichier d'origine, les caractères accentués (et sans doute les emojis)
-# sont devenus "??" : "d??gage". On retire ces trous à l'intérieur des mots.
-TROU_ENCODAGE_RE = re.compile(r"(?<=\w)\?{2,}(?=\w)")
+# ---------------------------------------------------------------------------
+# 1. Règles de nettoyage
+# ---------------------------------------------------------------------------
 
-# "noooooob", "!!!!!!!" -> 3 répétitions maximum
-REPETITION_RE = re.compile(r"(.)\1{3,}")
+# Balises de l'étape 1 -> jetons fixes, sans ponctuation.
+# Sans ça, le retrait de la ponctuation transformerait "<PERSON>" en "person"
+# (confondu avec le mot anglais) et "<USER_a3f2c91b>" en un mot différent pour
+# chaque joueur. Le modèle n'a besoin de savoir que "un joueur est visé".
+BALISES = [
+    (re.compile(r"<USER_[0-9a-fA-F]+>"), " xxuser "),
+    (re.compile(r"<PERSON>"), " xxperson "),
+    (re.compile(r"<URL>"), " xxurl "),
+    (re.compile(r"<EMAIL>"), " xxemail "),
+    (re.compile(r"<IP>"), " xxip "),
+    (re.compile(r"<PHONE>"), " xxphone "),
+]
 
-# Émoticônes fréquentes dans le chat : elles portent une intention
-# (moquerie, colère), on les transforme en mots pour le LSTM.
-EMOTICONES = {
-    ":)": " smiley ", ":-)": " smiley ", ":D": " rire ", "xD": " rire ", "XD": " rire ",
-    ":(": " triste ", ":-(": " triste ", ":P": " langue ", ":p": " langue ",
-}
+# Tout ce qui n'est ni une lettre (tous alphabets : latin, cyrillique...), ni un
+# chiffre, ni un espace = ponctuation, symbole OU emoji
+# -> remplacé par un espace. Les emojis disparaissent donc avec la ponctuation.
+# "_" est ajouté explicitement : \w le considère comme une lettre, sinon il
+# resterait des jetons comme "_" ou "____" (les jetons xxuser... n'en ont pas).
+PONCTUATION_RE = re.compile(r"[^\w\s]|_")
 
 
-def nettoyage_commun(texte: str) -> str:
-    """Corrections appliquées quel que soit le modèle."""
-    texte = html.unescape(str(texte))                 # "&gt;" -> ">"
-    texte = USER_RE.sub("<USER>", texte)
-    texte = TROU_ENCODAGE_RE.sub("", texte)
-    # Les emojis sont convertis en texte plutôt que supprimés : "🖕" est une
-    # insulte. Aucun dans GameTox, mais l'API en recevra.
-    texte = emoji.demojize(texte, delimiters=(" ", " "))
-    texte = REPETITION_RE.sub(r"\1\1\1", texte)
+def nettoyer(texte: str) -> str:
+    texte = str(texte)
+
+    # 1. Balises de l'étape 1 -> jetons fixes
+    for motif, jeton in BALISES:
+        texte = motif.sub(jeton, texte)
+
+    # 2. Casse : tout en minuscules (casefold gère aussi le cyrillique, l'allemand...)
+    texte = texte.casefold()
+
+    # 3. Ponctuation et emojis
+    texte = PONCTUATION_RE.sub(" ", texte)
+
+    # 4. Espaces multiples -> un seul
     return re.sub(r"\s+", " ", texte).strip()
 
 
-def nettoyer_transformer(texte: str) -> str:
-    """Nettoyage léger pour BERT et Laya : casse et ponctuation conservées."""
-    return nettoyage_commun(texte)
+# ---------------------------------------------------------------------------
+# 2. Application aux fichiers du dataset
+# ---------------------------------------------------------------------------
 
-
-def nettoyer_lstm(texte: str) -> str:
-    """Nettoyage fort pour le LSTM : un vocabulaire petit et régulier."""
-    texte = nettoyage_commun(texte)
-    for emoticone, mot in EMOTICONES.items():
-        texte = texte.replace(emoticone, mot)
-    texte = texte.lower()
-    # Les balises deviennent des mots simples : <person> -> person_tag
-    texte = re.sub(r"<(person|user|url|email|ip|phone)>", r" \1_tag ", texte)
-    # On garde "!" et "?" (l'agressivité passe souvent par là) et "*" (insultes
-    # censurées : "f***"). Le reste de la ponctuation est retiré.
-    texte = re.sub(r"([!?*])", r" \1 ", texte)
-    texte = re.sub(r"[^\w\s!?*]", " ", texte)
-    return re.sub(r"\s+", " ", texte).strip()
+def chemin_sortie(chemin_entree: str) -> Path:
+    """data_eval/val_anon.csv -> data_eval/val_clean.csv (même dossier)."""
+    entree = Path(chemin_entree)
+    sortie = entree.with_name(entree.name.replace("_anon", "_clean"))
+    # Sécurité : on refuse d'écraser le fichier source
+    if sortie.resolve() == entree.resolve():
+        raise ValueError(f"Le fichier de sortie écraserait la source : {entree}")
+    return sortie
 
 
 if __name__ == "__main__":
-    # Démonstration rapide avant / après
-    exemples = [
-        "BattleGreen (Skorpion G), T'es tellement gros que tu bloque mon tir d??gage!",
-        "<USER_775a2a10> (Kunze Panzer), you're blocking my line of fire!!!!!!",
-        "noooooob team :D &gt;=O",
-        "I will **** claus ******",
-        "gg 🖕",
-    ]
-    for e in exemples:
-        print(f"AVANT       : {e}")
-        print(f"TRANSFORMER : {nettoyer_transformer(e)}")
-        print(f"LSTM        : {nettoyer_lstm(e)}\n")
+    for chemin in FICHIERS:
+        df = pd.read_csv(chemin)
+        df["message_clean"] = df["message"].apply(nettoyer)
+
+        # Statistiques avant / après
+        vocab_avant = set(" ".join(df["message"].astype(str)).split())
+        vocab_apres = set(" ".join(df["message_clean"]).split())
+        vides = (df["message_clean"] == "").sum()
+        doublons = df["message_clean"].duplicated().sum()
+
+        print(f"\n=== {chemin} : {len(df)} messages")
+        print(f"  vocabulaire : {len(vocab_avant)} -> {len(vocab_apres)} mots distincts")
+        print(f"  messages vides après nettoyage : {vides}  (ex : '???', '!!!')")
+        print(f"  doublons après nettoyage       : {doublons}")
+        print("  exemples :")
+        for avant, apres in df[["message", "message_clean"]].sample(10, random_state=0).values:
+            print(f"    AVANT : {avant}\n    APRÈS : {apres}")
+
+        # Suppression des messages devenus vides (":)", "?", "***"...) : sans
+        # texte, le modèle n'a rien à apprendre. Les doublons sont gardés.
+        est_vide = df["message_clean"] == ""
+        if "label" in df:
+            print("  labels des messages vides supprimés :",
+                  df.loc[est_vide, "label"].value_counts().sort_index().to_dict())
+        print("  exemples supprimés :", df.loc[est_vide, "message"].head(8).tolist())
+        df = df[~est_vide].copy()
+
+        # Sauvegarde : on remplace la colonne d'origine par la version nettoyée.
+        df["message"] = df["message_clean"]
+        sortie = chemin_sortie(chemin)
+        df.drop(columns="message_clean").to_csv(sortie, index=False)
+        print(f"  -> écrit : {sortie} ({len(df)} messages)")

@@ -1,16 +1,3 @@
-"""
-TP1 - Étape 1 : anonymisation / pseudonymisation du dataset GameTox
-
-Usage : python anonymisation.py      (clé de pseudonymisation : variable PSEUDO_KEY)
-Lit   : data_train/train_raw.csv, data_eval/val_raw.csv
-Écrit : data_train/train_anon.csv, data_eval/val_anon.csv
-
-Ordre des traitements sur chaque message :
-  1. regex          e-mail, URL, IP, téléphone      -> <EMAIL> <URL> <IP> <PHONE>
-  2. pseudos        pseudonymisation par HMAC       -> <USER_xxxxxxxx>
-  3. NER spaCy      prénoms / noms                  -> <PERSON>
-"""
-
 import hashlib
 import hmac
 import ipaddress
@@ -282,9 +269,14 @@ FICHIERS = [
 
 
 def chemin_sortie(chemin_entree: str) -> Path:
-    """data_eval/val_raw.csv -> data_eval/val_anon.csv (même dossier)."""
+    """
+    Fichier de sortie dans le même dossier, nommé <jeu>_anon.csv :
+      data_train/train_raw.csv -> data_train/train_anon.csv
+      data_eval/val_raw.csv    -> data_eval/val_anon.csv
+    """
     entree = Path(chemin_entree)
-    sortie = entree.with_name(entree.name.replace("_raw", "_anon"))
+    jeu = entree.name.split("_")[0]          # "train", "val" ou "test"
+    sortie = entree.with_name(f"{jeu}_anon.csv")
     # Sécurité : on refuse d'écraser le fichier source
     if sortie.resolve() == entree.resolve():
         raise ValueError(f"Le fichier de sortie écraserait la source : {entree}")
