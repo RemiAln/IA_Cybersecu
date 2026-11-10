@@ -4,8 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import (f1_score, mean_absolute_error, precision_score,
-                             recall_score)
+from sklearn.metrics import precision_score, recall_score
 from sklearn.model_selection import train_test_split
 
 GRAINE = 42                  # même découpage et même initialisation à chaque lancement
@@ -67,22 +66,13 @@ def evaluer(nom: str, labels, probas: np.ndarray, duree_s: float, materiel: str)
     labels = np.asarray(labels)
     vrai_toxique = labels >= 1
     predit_toxique = (1 - probas[:, 0]) >= 0.5
-    scores = score_toxicite(probas)
 
     resultats = {
         "modele": nom,
         "precision": round(precision_score(vrai_toxique, predit_toxique, zero_division=0), 4),
         "rappel": round(recall_score(vrai_toxique, predit_toxique, zero_division=0), 4),
-        "f1": round(f1_score(vrai_toxique, predit_toxique, zero_division=0), 4),
-        # F1 macro sur les 6 notes : chaque note compte autant, même les rares
-        "f1_macro_6_notes": round(f1_score(labels, probas.argmax(1), average="macro",
-                                           zero_division=0), 4),
-        # écart moyen, en points sur 100, entre le score prédit et la vraie note x 20
-        "erreur_moyenne_score": round(mean_absolute_error(labels * 20, scores), 2),
-        "temps_total_s": round(duree_s, 2),
-        "temps_par_message_ms": round(1000 * duree_s / len(labels), 3),
-        "nb_messages_test": int(len(labels)),
-        "materiel": materiel,
+        # temps de prédiction sur tout le jeu de test, en secondes
+        "temps_execution_s": round(duree_s, 2),
     }
     DOSSIER_RESULTATS.mkdir(exist_ok=True)
     (DOSSIER_RESULTATS / f"{nom}.json").write_text(json.dumps(resultats, indent=2,
