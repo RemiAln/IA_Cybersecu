@@ -1,0 +1,12 @@
+{
+  "modele": "lstm",
+  "precision": 0.6987,
+  "rappel": 0.779,
+  "f1": 0.7366,
+  "f1_macro_6_notes": 0.4901,
+  "erreur_moyenne_score": 5.89,
+  "temps_total_s": 0.31,
+  "temps_par_message_ms": 0.058,
+  "nb_messages_test": 5367,
+  "materiel": "cpu"
+}

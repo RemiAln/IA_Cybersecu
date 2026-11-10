@@ -1,0 +1,12 @@
+pandas
+scikit-learn
+numpy
+torch
+transformers
+emoji
+laya
+# étape 1
+spacy
+gender-guesser
+phonenumbers
+python-dotenv

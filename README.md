@@ -13,6 +13,14 @@ IA_Cybersecu/
 ├── anonymisation.py         étape 1 : produit les *_anon.csv
 ├── comparaison.py           étape 1 : contrôle avant / après (lecture seule)
 ├── REGISTRE_RGPD.md         registre des traitements
+├── nettoyage.py             étape 2 : nettoyage des textes (LSTM / transformers)
+├── evaluation.py            étape 2 : découpage des données, score 0-100, métriques
+├── modele_lstm.py           étape 2 : modèle statistique (LSTM)
+├── modele_bert.py           étape 2 : modèle transformer (DistilBERT multilingue)
+├── modele_laya.py           étape 2 : modèle de décision (Laya)
+├── comparer_modeles.py      étape 2 : tableau comparatif
+├── etape2_gcp.ipynb         étape 2 : lancement sur GPU (GCP)
+├── resultats/               métriques de chaque modèle (JSON)
 └── TP1_Digital_Social_Score.pdf
 ```
 
@@ -43,3 +51,17 @@ python comparaison.py
 ```
 
 Sans `PSEUDO_KEY`, le script tire une clé au hasard : les codes `<USER_...>` changent alors à chaque exécution.
+
+## Étape 2 : entraîner et comparer les modèles
+
+```bash
+pip install -r requirements.txt
+python modele_lstm.py               # tourne sur CPU (~1 min)
+python modele_bert.py               # GPU conseillé
+python modele_laya.py zeroshot      # GPU conseillé
+python modele_laya.py finetune      # GPU nécessaire
+python comparer_modeles.py
+```
+
+Sur GCP : ouvrir `etape2_gcp.ipynb` dans Colab Enterprise ou Vertex AI Workbench (runtime GPU T4).
+Les modèles entraînés sont écrits dans `modeles/` (non versionné, trop lourd).
