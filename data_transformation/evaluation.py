@@ -12,6 +12,10 @@ from sklearn.model_selection import train_test_split
 
 GRAINE = 42                  # même découpage et même initialisation à chaque lancement
 NB_NOTES = 6                 # notes de toxicité 0 à 5
+
+# Nombre de messages d'entraînement, IDENTIQUE pour les 3 modèles (benchmark équitable).
+# None = tout le jeu d'entraînement.
+NB_EXEMPLES_TRAIN = 5000
 DOSSIER_RESULTATS = Path("resultats")
 
 
@@ -23,6 +27,9 @@ def charger_donnees():
               c'est sur lui qu'on compare les trois modèles.
     - valid = 10 % de data_train, tiré en gardant la proportion de chaque note :
               sert à choisir le meilleur epoch.
+    - train = NB_EXEMPLES_TRAIN messages tirés dans les 90 % restants, en gardant
+              la proportion de chaque note. Avec la graine fixe, ce sont TOUJOURS
+              les mêmes messages, pour les 3 modèles et à chaque lancement.
     """
     # Fichiers nettoyés par nettoyage.py. keep_default_na=False : sinon pandas
     # transforme des messages comme "nan", "null" ou "na" en valeur manquante.
@@ -33,6 +40,11 @@ def charger_donnees():
         df["label"] = df["label"].astype(int)
     train, valid = train_test_split(train, test_size=0.10, stratify=train["label"],
                                     random_state=GRAINE)
+    if NB_EXEMPLES_TRAIN is not None and NB_EXEMPLES_TRAIN < len(train):
+        train, _ = train_test_split(train, train_size=NB_EXEMPLES_TRAIN,
+                                    stratify=train["label"], random_state=GRAINE)
+    print(f"Données : {len(train)} messages d'entraînement, {len(valid)} de validation, "
+          f"{len(test)} d'évaluation")
     return train.reset_index(drop=True), valid.reset_index(drop=True), test
 
 

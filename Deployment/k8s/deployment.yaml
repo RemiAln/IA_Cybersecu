@@ -1,0 +1,48 @@
+# Deployment : décrit COMMENT faire tourner l'API dans le cluster GKE
+# (quelle image, combien de copies, quelles ressources, comment vérifier qu'elle va bien).
+#
+# ⚠️ Remplacer MON_PROJET par l'ID du projet GCP dans la ligne "image".
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dss-api
+  labels:
+    app: dss-api
+spec:
+  replicas: 2                      # 2 copies de l'API : si l'une tombe, l'autre répond
+  selector:
+    matchLabels:
+      app: dss-api
+  template:
+    metadata:
+      labels:
+        app: dss-api
+    spec:
+      containers:
+        - name: api
+          image: europe-west1-docker.pkg.dev/MON_PROJET/dss/api:v1
+          ports:
+            - containerPort: 8080
+          # Ressources réservées (requests) et maximum autorisé (limits) par copie.
+          # BERT-Mini + PyTorch CPU tiennent largement dans 1 Go.
+          resources:
+            requests:
+              cpu: "500m"          # 0,5 cœur
+              memory: "1Gi"
+            limits:
+              memory: "2Gi"
+          # readinessProbe : le pod ne reçoit du trafic qu'une fois le modèle chargé
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          # livenessProbe : si l'API ne répond plus, Kubernetes redémarre le pod
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 20

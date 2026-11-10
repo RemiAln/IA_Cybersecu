@@ -1,0 +1,14 @@
+# Service : donne une adresse IP publique à l'API et répartit les requêtes
+# entre les copies (pods) du Deployment -> c'est le load balancer.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: dss-api
+spec:
+  type: LoadBalancer               # GCP crée un équilibreur de charge avec une IP publique
+  selector:
+    app: dss-api                   # envoie le trafic aux pods qui portent ce label
+  ports:
+    - port: 80                     # port public  : http://<IP>/score
+      targetPort: 8080             # port de l'API dans le conteneur

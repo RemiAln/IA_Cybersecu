@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 os.environ.setdefault("USE_TF", "0")   # évite un blocage connu au chargement (doc Laya)
 import numpy as np
+import torch
 import laya
 from laya.train import TrainConfig, finetune, resolve_checkpoint_dir
 
@@ -16,10 +17,24 @@ from data_transformation.evaluation import NB_NOTES, Chrono, charger_donnees, ev
 # ---------------------------------------------------------------------------
 CHECKPOINT = "multilingual"   # le plus léger des modèles Laya (322 M de paramètres)
 LONGUEUR_MAX = 128            # longueur max d'un texte, en tokens
-NB_EXEMPLES_TRAIN = 2000      # nb de messages utilisés pour l'entraînement
+# Nb de messages d'entraînement : réglé dans data_transformation/evaluation.py
+# (NB_EXEMPLES_TRAIN), commun aux 3 modèles.
 NB_EXEMPLES_VALID = 500       # nb de messages de validation pendant l'entraînement
-EPOCHS = 2                   # nb de passages sur les données d'entraînement
+EPOCHS = 1                  # nb de passages sur les données d'entraînement
+
+# --- CONFIG CPU ---
+APPAREIL = "cpu"              # force le CPU (pas de recherche de GPU)
+NB_THREADS = torch.get_num_threads()   # nb de cœurs utilisés par PyTorch ; par défaut
+                                       # = cœurs physiques (ne pas dépasser ce nombre)
+# Calcul en précision réduite bf16 : plus rapide, MAIS seulement sur les processeurs
+# compatibles (sinon le programme plante net, erreur 0xC000001D sous Windows).
+# Laissé désactivé par sécurité.
+PRECISION_BF16 = False
 # ---------------------------------------------------------------------------
+
+torch.set_num_threads(NB_THREADS)
+if PRECISION_BF16:
+    os.environ["LAYA_CPU_AMP"] = "bf16"
 
 # Question posée à Laya pour chaque message : une note de 0 à 5
 QUESTIONS = {
@@ -50,13 +65,14 @@ def preparer_jsonl(df, chemin):
 
 
 if __name__ == "__main__":
+    print(f"Config : appareil={APPAREIL}, threads={NB_THREADS}, bf16={PRECISION_BF16}")
     train, valid, test = charger_donnees()
 
-    # 1. Sous-ensembles tirés au hasard, en gardant la répartition des notes
-    echantillon = train.groupby("label").sample(
-        frac=min(1, NB_EXEMPLES_TRAIN / len(train)), random_state=42)
+    # 1. Données au format Laya. "train" contient déjà les NB_EXEMPLES_TRAIN messages
+    #    communs aux 3 modèles (voir charger_donnees) ; la validation est réduite
+    #    à NB_EXEMPLES_VALID messages pour gagner du temps.
     Path("modeles").mkdir(exist_ok=True)
-    preparer_jsonl(echantillon, "modeles/laya_train.jsonl")
+    preparer_jsonl(train, "modeles/laya_train.jsonl")
     preparer_jsonl(valid.sample(min(NB_EXEMPLES_VALID, len(valid)), random_state=42),
                    "modeles/laya_valid.jsonl")
 
@@ -66,12 +82,14 @@ if __name__ == "__main__":
         model_dir=resolve_checkpoint_dir(CHECKPOINT),
         output_dir="modeles/laya",
         config=TrainConfig(epochs=EPOCHS, loss="soft-ce", max_len=LONGUEUR_MAX,
+                           amp=False,   # pas de calcul 16 bits (réservé au GPU)
                            eval_data="modeles/laya_valid.jsonl"),
+        device=APPAREIL,
     )
     print(resume)
 
     # 3. Évaluation sur le jeu de test (val_clean.csv)
-    agent = laya.load("modeles/laya")
+    agent = laya.load("modeles/laya", device=APPAREIL)
     with Chrono() as c:
         probas = predire(agent, test["message"].tolist())
-    evaluer("laya", test["label"], probas, c.duree, "cpu")
+    evaluer("laya", test["label"], probas, c.duree, APPAREIL)

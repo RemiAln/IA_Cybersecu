@@ -1,0 +1,21 @@
+# HorizontalPodAutoscaler : ajoute ou retire des copies de l'API selon la charge.
+# C'est ce qui rend l'API scalable (utile pour les tests de charge de l'étape 5).
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: dss-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: dss-api
+  minReplicas: 2                   # jamais moins de 2 copies (haute disponibilité)
+  maxReplicas: 10                  # jamais plus de 10 (maîtrise des coûts)
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60   # au-delà de 60 % de CPU en moyenne, on ajoute des copies

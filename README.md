@@ -25,7 +25,8 @@ IA_Cybersecu/
 │   ├── api.py                   étape 3 : API FastAPI (score 0-100)
 │   ├── Dockerfile               étape 3 : image de l'API
 │   ├── cloudbuild.yaml          étape 3 : construction de l'image sur Google Cloud
-│   └── tester_api.py            étape 3 : exemples de requêtes / réponses
+│   ├── tester_api.py            étape 3 : exemples de requêtes / réponses
+│   └── k8s/                     étape 3 : déploiement GKE (deployment, service, hpa)
 ├── modeles/                     modèles entraînés (non versionné, trop lourd)
 ├── resultats/                   métriques de chaque modèle (JSON)
 ├── REGISTRE_RGPD.md             registre des traitements
@@ -86,4 +87,22 @@ docker run -p 8080:8080 digital-social-score
 python Deployment/tester_api.py http://127.0.0.1:8080
 ```
 
-Déploiement sur Cloud Run : voir les commandes `gcloud` (Artifact Registry, Cloud Build, Cloud Run).
+### Déploiement sur GKE
+
+```bash
+# Outils (une fois)
+gcloud components install kubectl gke-gcloud-auth-plugin
+gcloud services enable container.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com
+gcloud artifacts repositories create dss --repository-format=docker --location=europe-west1
+
+# Image -> Artifact Registry
+gcloud builds submit --config Deployment/cloudbuild.yaml \
+  --substitutions=_IMAGE=europe-west1-docker.pkg.dev/MON_PROJET/dss/api:v1 .
+
+# Cluster GKE Autopilot + déploiement
+gcloud container clusters create-auto dss-cluster --region europe-west1
+gcloud container clusters get-credentials dss-cluster --region europe-west1
+kubectl apply -f Deployment/k8s/
+kubectl get service dss-api          # IP publique dans EXTERNAL-IP
+python Deployment/tester_api.py http://<EXTERNAL-IP>
+```
