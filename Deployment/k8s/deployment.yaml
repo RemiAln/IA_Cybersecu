@@ -24,6 +24,19 @@ spec:
           image: europe-west1-docker.pkg.dev/MON_PROJET/dss/api:v1
           ports:
             - containerPort: 8080
+          # Secrets (étape 4) : clé API et sel des logs, lus dans le Secret
+          # Kubernetes "dss-secrets" (créé à la main, JAMAIS écrit dans git)
+          env:
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dss-secrets
+                  key: API_KEY
+            - name: LOG_SALT
+              valueFrom:
+                secretKeyRef:
+                  name: dss-secrets
+                  key: LOG_SALT
           # Ressources réservées (requests) et maximum autorisé (limits) par copie.
           # Laya (~650 Mo sur disque, plus en mémoire une fois chargé) + PyTorch CPU.
           resources:

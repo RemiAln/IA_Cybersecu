@@ -1,5 +1,9 @@
 # Service : donne une adresse IP publique à l'API et répartit les requêtes
 # entre les copies (pods) du Deployment -> c'est le load balancer.
+#
+# Remarque (étape 4) : l'API est exposée en HTTP. Le HTTPS n'a pas été mis en
+# place dans le cadre du TP (consigne de l'enseignant) ; voir le rapport pour
+# la solution prévue (Ingress + certificat géré par Google).
 
 apiVersion: v1
 kind: Service

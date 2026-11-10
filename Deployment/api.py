@@ -1,15 +1,32 @@
 """
-TP1 - Étape 3 : API "Digital Social Score"
+TP1 - Étapes 3 et 4 : API "Digital Social Score"
 
 Reçoit un texte et renvoie un score de toxicité de 0 à 100, calculé par le
 modèle Laya entraîné à l'étape 2 (dossier modeles/laya).
 
-Lancement local : uvicorn Deployment.api:app      (depuis la racine du projet)
-Documentation   : http://127.0.0.1:8000/docs  (page générée automatiquement)
+Sécurité (étape 4) :
+  - clé API obligatoire sur /score (en-tête X-API-Key), sinon erreur 401
+  - validation des entrées (texte de 1 à 1 000 caractères), sinon erreur 422
+  - logs pseudonymisés : le texte reçu n'est JAMAIS écrit dans les journaux,
+    l'IP du client est remplacée par une empreinte (HMAC)
+
+Variables d'environnement (fournies par un Secret Kubernetes, jamais dans le code) :
+  API_KEY   clé(s) API acceptée(s), séparées par des virgules
+  LOG_SALT  clé secrète utilisée pour pseudonymiser les IP dans les logs
+
+Lancement local (depuis la racine du projet, PowerShell) :
+  $env:API_KEY="cle-de-test"; $env:LOG_SALT="sel-de-test"; uvicorn Deployment.api:app
+Documentation : http://127.0.0.1:8000/docs  (bouton "Authorize" pour saisir la clé)
 """
 
+import hashlib
+import hmac
 import json
+import logging
 import os
+import secrets
+import sys
+import time
 
 # Avant d'importer laya : pas de TensorFlow (blocage connu), et aucun accès à
 # Internet pour le modèle (il est déjà dans l'image, rien à télécharger).
@@ -18,7 +35,8 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 import laya
 import numpy as np
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from data_transformation.nettoyage import nettoyer
@@ -27,6 +45,37 @@ DOSSIER_MODELE = "modeles/laya"   # relatif à la racine du projet (ou /app dans
 LONGUEUR_MAX = 128                # identique à l'entraînement (modele_laya.py)
 SEUIL_TOXIQUE = 0.5               # identique à l'évaluation : P(note >= 1) >= 0.5
 NB_NOTES = 6                      # notes 0 à 5
+
+# ---------------------------------------------------------------------------
+# Secrets (étape 4) : lus dans l'environnement, jamais écrits dans le code
+# ---------------------------------------------------------------------------
+# Plusieurs clés possibles (une par client), séparées par des virgules
+CLES_API = [c.strip() for c in os.environ.get("API_KEY", "").split(",") if c.strip()]
+# Sel des empreintes d'IP : sans lui, on pourrait retrouver une IP en testant
+# toutes les adresses possibles. S'il manque, on en tire un au hasard.
+SEL_LOGS = os.environ.get("LOG_SALT", "").encode() or secrets.token_bytes(32)
+
+# ---------------------------------------------------------------------------
+# Logs : une ligne JSON par requête sur la sortie standard. Sur GKE, Cloud
+# Logging les récupère automatiquement et sait filtrer sur chaque champ.
+# ---------------------------------------------------------------------------
+logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
+journal = logging.getLogger("dss")
+
+
+def pseudonymiser(valeur: str) -> str:
+    """Empreinte HMAC-SHA256 (8 caractères) : même entrée -> même empreinte,
+    mais impossible de retrouver la valeur d'origine sans le sel secret."""
+    return hmac.new(SEL_LOGS, valeur.encode(), hashlib.sha256).hexdigest()[:8]
+
+
+def log(**champs):
+    journal.info(json.dumps(champs, ensure_ascii=False))
+
+
+if not CLES_API:
+    # Fail-closed : sans clé configurée, /score refusera TOUTES les requêtes
+    log(niveau="ATTENTION", message="API_KEY non définie : /score refusera toutes les requêtes")
 
 # ---------------------------------------------------------------------------
 # Chargement du modèle : UNE SEULE FOIS, au démarrage de l'API
@@ -54,9 +103,53 @@ predire("gg")
 
 app = FastAPI(
     title="Digital Social Score",
-    description="Détection de toxicité : renvoie un score de 0 (sain) à 100 (très toxique).",
-    version="1.0",
+    description="Détection de toxicité : renvoie un score de 0 (sain) à 100 (très toxique). "
+                "La route /score exige une clé API (en-tête X-API-Key).",
+    version="2.0",
 )
+
+
+# ---------------------------------------------------------------------------
+# Authentification par clé API (étape 4)
+# ---------------------------------------------------------------------------
+# auto_error=False : on gère nous-mêmes l'erreur, pour renvoyer un 401 explicite
+schema_cle = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def verifier_cle(request: Request, cle: str = Depends(schema_cle)):
+    """Refuse la requête (401) si la clé est absente ou inconnue."""
+    # compare_digest : comparaison en temps constant, pour qu'un attaquant ne
+    # puisse pas deviner la clé caractère par caractère en mesurant le temps
+    if not cle or not any(secrets.compare_digest(cle, c) for c in CLES_API):
+        raise HTTPException(status_code=401, detail="Clé API absente ou invalide")
+    # Identifiant pseudonymisé du client (empreinte de sa clé), pour les logs
+    request.state.client_cle = pseudonymiser(cle)
+
+
+# ---------------------------------------------------------------------------
+# Journalisation de chaque requête (middleware : s'exécute autour de TOUTES
+# les routes, y compris quand la requête est refusée en 401 ou 422)
+# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def journaliser(request: Request, call_next):
+    debut = time.perf_counter()
+    reponse = await call_next(request)
+    if request.url.path != "/health":       # les sondes Kubernetes ne sont pas journalisées
+        # Derrière le load balancer, la vraie IP du client est dans X-Forwarded-For
+        ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() \
+            or (request.client.host if request.client else "inconnue")
+        log(
+            route=request.url.path,
+            methode=request.method,
+            statut=reponse.status_code,
+            duree_ms=round((time.perf_counter() - debut) * 1000, 1),
+            client_ip=pseudonymiser(ip),                            # IP pseudonymisée
+            client_cle=getattr(request.state, "client_cle", None),  # clé pseudonymisée
+            score=getattr(request.state, "score", None),
+            longueur_texte=getattr(request.state, "longueur", None),
+            # Le TEXTE n'est volontairement jamais journalisé (RGPD : minimisation)
+        )
+    return reponse
 
 
 # ---------------------------------------------------------------------------
@@ -78,12 +171,12 @@ class Reponse(BaseModel):
 # ---------------------------------------------------------------------------
 @app.get("/health")
 def health():
-    """Vérifie que l'API répond (utilisé par Kubernetes et les tests de charge)."""
+    """Vérifie que l'API répond (utilisé par Kubernetes). Pas de clé requise."""
     return {"statut": "ok"}
 
 
-@app.post("/score", response_model=Reponse)
-def score(requete: Requete):
+@app.post("/score", response_model=Reponse, dependencies=[Depends(verifier_cle)])
+def score(requete: Requete, request: Request):
     # 1. Même nettoyage qu'à l'entraînement (minuscules, ponctuation...)
     texte = nettoyer(requete.texte)
 
@@ -95,9 +188,14 @@ def score(requete: Requete):
     #    part dans "note" : le modèle est fiable pour dire "toxique ou non", moins
     #    pour la gravité exacte (trop peu d'exemples de notes 4 et 5).
     p_toxique = float(1 - probas[0])
+    score_0_100 = round(p_toxique * 100, 1)
+
+    # Informations transmises au journal (le score et la LONGUEUR, pas le texte)
+    request.state.score = score_0_100
+    request.state.longueur = len(requete.texte)
 
     return Reponse(
-        score=round(p_toxique * 100, 1),
+        score=score_0_100,
         note=int(probas.argmax()),
         toxique=p_toxique >= SEUIL_TOXIQUE,
     )
