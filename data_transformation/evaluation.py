@@ -37,11 +37,15 @@ def charger_donnees():
     # transforme des messages comme "nan", "null" ou "na" en valeur manquante.
     train = pd.read_csv("data_train/train_clean.csv", keep_default_na=False)
     test = pd.read_csv("data_eval/val_clean.csv", keep_default_na=False)
+    # Types sûrs : texte en chaîne, note en entier (0.0 -> 0)
     for df in (train, test):
         df["message"] = df["message"].astype(str)
         df["label"] = df["label"].astype(int)
+    # Découpage 90 % train / 10 % validation. stratify : même proportion de
+    # chaque note des deux côtés (important avec des notes rares comme 4 et 5)
     train, valid = train_test_split(train, test_size=0.10, stratify=train["label"],
                                     random_state=GRAINE)
+    # Réduction du train au même sous-ensemble pour les 3 modèles
     if NB_EXEMPLES_TRAIN is not None and NB_EXEMPLES_TRAIN < len(train):
         train, _ = train_test_split(train, train_size=NB_EXEMPLES_TRAIN,
                                     stratify=train["label"], random_state=GRAINE)
@@ -58,19 +62,19 @@ def poids_classes(labels) -> np.ndarray:
     On prend 1 / racine(fréquence) plutôt que 1 / fréquence : avec 24 exemples,
     un poids 1 400 fois plus fort que la note 0 rendrait l'entraînement instable.
     """
-    comptes = np.bincount(labels, minlength=NB_NOTES).astype(float)
-    poids = 1.0 / np.sqrt(np.maximum(comptes, 1))
-    return poids / poids.mean()
+    comptes = np.bincount(labels, minlength=NB_NOTES).astype(float)  # nb de messages par note
+    poids = 1.0 / np.sqrt(np.maximum(comptes, 1))   # max(.,1) : évite une division par 0
+    return poids / poids.mean()                     # normalisation : poids moyen = 1
 
 
 def score_toxicite(probas: np.ndarray) -> np.ndarray:
     """
-    Score 0-100 = note moyenne attendue x 20.
-    Ex : P(0)=0.5, P(2)=0.5 -> note attendue 1 -> score 20.
-    Plus juste que "note la plus probable x 20" : le score bouge en continu
-    quand le modèle hésite.
+    Score 0-100 = probabilité que le message soit toxique (note >= 1), en %.
+    Ex : P(0)=0.08 -> score 92. Même calcul que l'API (Deployment/api.py).
+    (Ancienne version : note moyenne attendue x 20, abandonnée car les messages
+    toxiques plafonnaient vers 20-40, faute d'exemples de notes graves.)
     """
-    return probas @ np.arange(NB_NOTES) * (100 / (NB_NOTES - 1))
+    return (1 - probas[:, 0]) * 100
 
 
 def mesurer_temps_requete(predire_un, textes, n=NB_REQUETES_TEST) -> float:
@@ -99,12 +103,14 @@ def evaluer(nom: str, labels, probas: np.ndarray, temps_requete_ms: float, mater
     toxique si P(note >= 1) >= 0.5.
     """
     labels = np.asarray(labels)
-    vrai_toxique = labels >= 1
-    predit_toxique = (1 - probas[:, 0]) >= 0.5
+    vrai_toxique = labels >= 1                      # vérité : note de 1 à 5
+    predit_toxique = (1 - probas[:, 0]) >= 0.5      # modèle : P(note >= 1) >= 50 %
 
     resultats = {
         "modele": nom,
+        # précision : parmi les messages signalés toxiques, part qui l'est vraiment
         "precision": round(precision_score(vrai_toxique, predit_toxique, zero_division=0), 4),
+        # rappel : parmi les messages vraiment toxiques, part que le modèle a détectée
         "rappel": round(recall_score(vrai_toxique, predit_toxique, zero_division=0), 4),
         # temps de traitement d'une requête (un message), en millisecondes
         "temps_par_requete_ms": round(temps_requete_ms, 2),

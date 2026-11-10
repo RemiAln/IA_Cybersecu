@@ -68,9 +68,9 @@ class Requete(BaseModel):
 
 
 class Reponse(BaseModel):
-    score: float           # 0 à 100
-    note: int              # note la plus probable, de 0 à 5
-    toxique: bool          # True si P(note >= 1) >= 0.5
+    score: float           # 0 à 100 = probabilité que le message soit toxique, en %
+    note: int              # gravité la plus probable, de 0 (sain) à 5
+    toxique: bool          # True si score >= 50
 
 
 # ---------------------------------------------------------------------------
@@ -90,11 +90,14 @@ def score(requete: Requete):
     # 2. Prédiction : probabilités des 6 notes (0 à 5)
     probas = predire(texte)
 
-    # 3. Score 0-100 = note moyenne attendue x 20 (même calcul qu'à l'étape 2)
-    score_0_100 = float(probas @ np.arange(NB_NOTES) * 20)
+    # 3. Score 0-100 = probabilité que le message soit toxique (note >= 1), en %.
+    #    Même principe que l'API Perspective de Google. La gravité est donnée à
+    #    part dans "note" : le modèle est fiable pour dire "toxique ou non", moins
+    #    pour la gravité exacte (trop peu d'exemples de notes 4 et 5).
+    p_toxique = float(1 - probas[0])
 
     return Reponse(
-        score=round(score_0_100, 1),
+        score=round(p_toxique * 100, 1),
         note=int(probas.argmax()),
-        toxique=bool(1 - probas[0] >= SEUIL_TOXIQUE),
+        toxique=p_toxique >= SEUIL_TOXIQUE,
     )
