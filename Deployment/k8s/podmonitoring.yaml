@@ -1,0 +1,17 @@
+# PodMonitoring (étape 6) : demande à Google Managed Prometheus (inclus dans
+# GKE Autopilot) de lire les métriques des pods de l'API toutes les 15 secondes.
+# Prometheus lit le port "metriques" (9090) depuis l'intérieur du cluster :
+# ce port n'est pas exposé sur Internet.
+
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: dss-api
+spec:
+  selector:
+    matchLabels:
+      app: dss-api
+  endpoints:
+    - port: metriques
+      path: /metrics
+      interval: 15s

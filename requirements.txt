@@ -10,3 +10,5 @@ spacy
 gender-guesser
 phonenumbers
 python-dotenv
+# étape 5 (tests de charge)
+locust

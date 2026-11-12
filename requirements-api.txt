@@ -7,3 +7,4 @@ fastapi
 uvicorn
 numpy
 pandas
+prometheus-fastapi-instrumentator   # étape 6 : métriques Prometheus (inclut prometheus_client)

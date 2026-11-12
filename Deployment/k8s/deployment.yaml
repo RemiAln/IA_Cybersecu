@@ -23,7 +23,9 @@ spec:
         - name: api
           image: europe-west1-docker.pkg.dev/MON_PROJET/dss/api:v1
           ports:
-            - containerPort: 8080
+            - containerPort: 8080      # API (exposée par le Service)
+            - name: metriques          # métriques Prometheus (étape 6) : PAS exposé
+              containerPort: 9090      # par le Service, lu seulement dans le cluster
           # Secrets (étape 4) : clé API et sel des logs, lus dans le Secret
           # Kubernetes "dss-secrets" (créé à la main, JAMAIS écrit dans git)
           env:

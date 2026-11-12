@@ -1,0 +1,90 @@
+# Grafana (étape 6) : tableaux de bord sur les métriques collectées par
+# Google Managed Prometheus.
+#
+#   API (port 9090) ──► Managed Prometheus ──► frontend (proxy de lecture) ──► Grafana
+#
+# - Le "frontend" est le proxy officiel de Google : il permet à Grafana de lire
+#   Managed Prometheus comme un Prometheus classique. Il est installé à part
+#   (voir README, étape 6), avec un seul droit IAM : monitoring.viewer (lecture).
+# - Grafana n'a PAS d'IP publique (Service ClusterIP) : on y accède uniquement
+#   par un tunnel kubectl port-forward, réservé aux comptes du projet GCP.
+# - Mot de passe administrateur : dans le Secret "grafana-admin", créé à la main
+#   (jamais écrit dans git).
+#
+# Tout est dans le namespace "supervision", séparé de l'API.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-sources
+  namespace: supervision
+data:
+  # Source de données ajoutée automatiquement au démarrage de Grafana
+  prometheus.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus (GMP)
+        type: prometheus
+        access: proxy
+        url: http://frontend.supervision.svc:9090
+        isDefault: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: supervision
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.3.0
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: mot_de_passe
+            - name: GF_USERS_ALLOW_SIGN_UP       # pas de création de compte libre
+              value: "false"
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+          volumeMounts:
+            - name: sources
+              mountPath: /etc/grafana/provisioning/datasources
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+      volumes:
+        - name: sources
+          configMap:
+            name: grafana-sources
+---
+# ClusterIP : Grafana n'est joignable que depuis l'intérieur du cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: supervision
+spec:
+  type: ClusterIP
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000

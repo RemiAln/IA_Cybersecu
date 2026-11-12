@@ -10,6 +10,11 @@ Sécurité (étape 4) :
   - logs pseudonymisés : le texte reçu n'est JAMAIS écrit dans les journaux,
     l'IP du client est remplacée par une empreinte (HMAC)
 
+Supervision (étape 6) :
+  - métriques Prometheus (requêtes, codes HTTP, latence, temps d'inférence, scores)
+    servies sur un PORT SÉPARÉ (9090), que le Service n'expose pas sur Internet :
+    seul Prometheus, à l'intérieur du cluster, peut les lire
+
 Variables d'environnement (fournies par un Secret Kubernetes, jamais dans le code) :
   API_KEY   clé(s) API acceptée(s), séparées par des virgules
   LOG_SALT  clé secrète utilisée pour pseudonymiser les IP dans les logs
@@ -37,6 +42,8 @@ import laya
 import numpy as np
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import APIKeyHeader
+from prometheus_client import Histogram, start_http_server
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
 
 from data_transformation.nettoyage import nettoyer
@@ -45,6 +52,25 @@ DOSSIER_MODELE = "modeles/laya"   # relatif à la racine du projet (ou /app dans
 LONGUEUR_MAX = 128                # identique à l'entraînement (modele_laya.py)
 SEUIL_TOXIQUE = 0.5               # identique à l'évaluation : P(note >= 1) >= 0.5
 NB_NOTES = 6                      # notes 0 à 5
+PORT_METRIQUES = 9090             # port interne des métriques Prometheus (étape 6)
+
+# ---------------------------------------------------------------------------
+# Métriques Prometheus propres au modèle (étape 6)
+# (les métriques HTTP - requêtes, codes, latence - sont ajoutées plus bas
+#  automatiquement par prometheus_fastapi_instrumentator)
+# ---------------------------------------------------------------------------
+# Temps de calcul du modèle seul. Comparé à la latence HTTP totale, il montre
+# combien de temps les requêtes passent à ATTENDRE (file d'attente sous la charge).
+LATENCE_INFERENCE = Histogram(
+    "inference_latency_seconds", "Latence d'inférence du modèle Laya",
+    buckets=(0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5),
+)
+# Répartition des scores renvoyés : une hausse soudaine des scores élevés peut
+# signaler un comportement anormal (raid de messages toxiques, spam...).
+SCORES = Histogram(
+    "dss_score_toxicite", "Scores de toxicité renvoyés (0 à 100)",
+    buckets=(10, 20, 30, 40, 50, 60, 70, 80, 90, 100),
+)
 
 # ---------------------------------------------------------------------------
 # Secrets (étape 4) : lus dans l'environnement, jamais écrits dans le code
@@ -92,7 +118,8 @@ ID_QUESTION = next(iter(QUESTIONS))          # "toxicite"
 
 def predire(texte: str) -> np.ndarray:
     """Probabilités des 6 notes (0 à 5) pour un texte déjà nettoyé."""
-    reponse = agent.predict_batch([texte], QUESTIONS, max_len=LONGUEUR_MAX)[0]
+    with LATENCE_INFERENCE.time():           # mesure le temps de calcul du modèle
+        reponse = agent.predict_batch([texte], QUESTIONS, max_len=LONGUEUR_MAX)[0]
     probas = reponse["answers"][ID_QUESTION]["probabilities"]
     return np.array([probas[str(k)] for k in range(NB_NOTES)])
 
@@ -105,8 +132,18 @@ app = FastAPI(
     title="Digital Social Score",
     description="Détection de toxicité : renvoie un score de 0 (sain) à 100 (très toxique). "
                 "La route /score exige une clé API (en-tête X-API-Key).",
-    version="2.0",
+    version="2.1",
 )
+
+# Métriques HTTP automatiques : nombre de requêtes et latence par route et par code.
+# - should_group_status_codes=False : garde 401 et 422 séparés (au lieu de "4xx"),
+#   pour repérer une attaque par fausses clés (pic de 401)
+# - /health exclu : les sondes Kubernetes fausseraient les statistiques
+# Pas de .expose(app) comme dans le cours : /metrics serait alors public sur l'IP
+# du load balancer. Les métriques sont servies sur le port interne 9090.
+Instrumentator(should_group_status_codes=False,
+               excluded_handlers=["/health"]).instrument(app)
+start_http_server(PORT_METRIQUES)
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +230,7 @@ def score(requete: Requete, request: Request):
     # Informations transmises au journal (le score et la LONGUEUR, pas le texte)
     request.state.score = score_0_100
     request.state.longueur = len(requete.texte)
+    SCORES.observe(score_0_100)              # métrique Prometheus (étape 6)
 
     return Reponse(
         score=score_0_100,
