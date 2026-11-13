@@ -22,7 +22,7 @@ sécurisé sur Google Kubernetes Engine, et tests de montée en charge.
 ## Organisation du dépôt
 
 ```
-IA_Cybersecu/
+TP1/
 ├── data_train/                  jeu d'entraînement
 │   ├── train_raw.csv            messages bruts GameTox (42 959 lignes)
 │   ├── train_anon.csv           anonymisé (généré, étape 1)
@@ -42,12 +42,15 @@ IA_Cybersecu/
 │   ├── Dockerfile               étape 3 : image de l'API
 │   ├── cloudbuild.yaml          étape 3 : construction de l'image sur Google Cloud Build
 │   ├── tester_api.py            étapes 3-4 : exemples de requêtes et tests de sécurité
-│   └── k8s/                     étape 3 : manifestes Kubernetes
-│       ├── deployment.yaml      pods de l'API (2 copies, ressources, sondes de santé, secrets)
-│       ├── service.yaml         répartiteur de charge (IP publique)
-│       └── hpa.yaml             autoscaling de 2 à 10 pods selon le CPU
-├── charge/
-│   └── locustfile.py            étape 5 : scénarios de charge (montée, stress, panne)
+│   ├── locustfile.py            étape 5 : scénarios de charge (montée, stress, panne)
+│   ├── tester_attaques.py       étape 6 : simulation d'attaques (injection, contournement, fausses clés)
+│   ├── k8s/                     étapes 3 et 6 : manifestes Kubernetes
+│   │   ├── deployment.yaml      pods de l'API (2 copies, ressources, sondes de santé, secrets)
+│   │   ├── service.yaml         répartiteur de charge (IP publique)
+│   │   ├── hpa.yaml             autoscaling de 2 à 10 pods selon le CPU
+│   │   └── podmonitoring.yaml   collecte des métriques par Managed Prometheus
+│   └── supervision/
+│       └── grafana.yaml         étape 6 : Grafana (tableaux de bord, accès privé)
 ├── docs/
 │   └── API.md                   documentation de l'API + exemples de requêtes / réponses
 ├── resultats/                   métriques des modèles (JSON) et rapports de charge
@@ -58,7 +61,7 @@ IA_Cybersecu/
 └── TP1_Digital_Social_Score.pdf énoncé
 ```
 
-**Toutes les commandes se lancent depuis la racine du projet**, avec `python -m dossier.script`
+**Toutes les commandes se lancent depuis le dossier `TP1/`**, avec `python -m dossier.script`
 (sinon les imports entre dossiers et les chemins des données ne fonctionnent pas).
 
 ### Ce qui n'est pas dans le dépôt (volontairement)
@@ -169,7 +172,7 @@ kubectl logs deployment/dss-api --tail=20      # journaux pseudonymisés
 
 ```bash
 pip install locust
-SCENARIO=montee API_KEY=<clé-API> locust -f charge/locustfile.py --headless \
+SCENARIO=montee API_KEY=<clé-API> locust -f Deployment/locustfile.py --headless \
   --host http://<EXTERNAL-IP> --csv resultats/charge_montee --html resultats/charge_montee.html
 ```
 | Scénario (`SCENARIO=`) | Charge | Durée |

@@ -1,0 +1,50 @@
+{
+  "laya": {
+    "accuracy": 0.8592983779705772,
+    "precision": 0.7449908925318761,
+    "taux_faux_positifs": 0.032656869605784934
+  },
+  "copies": [
+    {
+      "accuracy": 0.8300641267446247,
+      "precision": 0.8607594936708861,
+      "taux_faux_positifs": 0.0051317937951947746,
+      "accord_avec_laya": 0.9232365145228216,
+      "nb_requetes": 100
+    },
+    {
+      "accuracy": 0.8340248962655602,
+      "precision": 0.7547169811320755,
+      "taux_faux_positifs": 0.015162118031257289,
+      "accord_avec_laya": 0.928706148623161,
+      "nb_requetes": 250
+    },
+    {
+      "accuracy": 0.8344021124104112,
+      "precision": 0.7202572347266881,
+      "taux_faux_positifs": 0.020293911826452064,
+      "accord_avec_laya": 0.9351188230856281,
+      "nb_requetes": 500
+    },
+    {
+      "accuracy": 0.8427008675971331,
+      "precision": 0.7061503416856492,
+      "taux_faux_positifs": 0.030090972708187544,
+      "accord_avec_laya": 0.9415314975480951,
+      "nb_requetes": 1000
+    },
+    {
+      "accuracy": 0.8457185967559412,
+      "precision": 0.7073684210526315,
+      "taux_faux_positifs": 0.0324236062514579,
+      "accord_avec_laya": 0.9471897397208601,
+      "nb_requetes": 2000
+    }
+  ],
+  "latence": {
+    "base_moyenne_ms": 245.08666666676314,
+    "base_p95_ms": 288.57094500044684,
+    "attaque_moyenne_ms": 472.88963651726885,
+    "attaque_p95_ms": 794.7272000001249
+  }
+}

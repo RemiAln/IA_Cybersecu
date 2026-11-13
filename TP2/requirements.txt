@@ -1,0 +1,6 @@
+# Dépendances du TP2 (en plus de celles du TP1)
+matplotlib                          # graphiques des étapes 2 et 3
+scikit-learn                        # le clone de l'attaque par extraction
+requests
+pandas
+prometheus-fastapi-instrumentator   # nécessaire pour lancer l'API du TP1 en local (métriques)

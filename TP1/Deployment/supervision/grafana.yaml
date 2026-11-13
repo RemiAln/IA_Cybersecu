@@ -1,0 +1,168 @@
+# Grafana (étape 6) : tableaux de bord sur les métriques collectées par
+# Google Managed Prometheus.
+#
+#   API (port 9090) ──► Managed Prometheus ──► frontend (proxy de lecture) ──► Grafana
+#
+# - Le "frontend" est le proxy officiel de Google : il permet à Grafana de lire
+#   Managed Prometheus comme un Prometheus classique. Il est installé à part
+#   (voir README, étape 6), avec un seul droit IAM : monitoring.viewer (lecture).
+# - Grafana n'a PAS d'IP publique (Service ClusterIP) : on y accède uniquement
+#   par un tunnel kubectl port-forward, réservé aux comptes du projet GCP.
+# - Mot de passe administrateur : dans le Secret "grafana-admin", créé à la main
+#   (jamais écrit dans git).
+#
+# Tout est dans le namespace "supervision", séparé de l'API.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-sources
+  namespace: supervision
+data:
+  # Source de données ajoutée automatiquement au démarrage de Grafana
+  prometheus.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus (GMP)
+        uid: gmp
+        type: prometheus
+        access: proxy
+        url: http://frontend.supervision.svc:9090
+        isDefault: true
+---
+# Tableau de bord "DSS - API" chargé automatiquement au démarrage de Grafana
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-tableaux
+  namespace: supervision
+data:
+  fournisseur.yaml: |
+    apiVersion: 1
+    providers:
+      - name: dss
+        folder: DSS
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards
+  dss-api.json: |
+    {
+      "title": "DSS - API",
+      "uid": "dss-api",
+      "refresh": "30s",
+      "time": {"from": "now-1h", "to": "now"},
+      "panels": [
+        {"type": "timeseries", "title": "Requêtes /score par code HTTP (req/s)",
+         "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+         "datasource": {"type": "prometheus", "uid": "gmp"},
+         "targets": [{"refId": "A", "legendFormat": "{{status}}",
+           "expr": "sum by (status) (rate(http_requests_total{handler=\"/score\"}[1m]))"}]},
+        {"type": "timeseries", "title": "Latence P95 : totale vs modèle seul (s)",
+         "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+         "datasource": {"type": "prometheus", "uid": "gmp"},
+         "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+         "targets": [
+           {"refId": "A", "legendFormat": "totale (attente comprise)",
+            "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_highr_seconds_bucket[1m])))"},
+           {"refId": "B", "legendFormat": "modèle seul",
+            "expr": "histogram_quantile(0.95, sum by (le) (rate(inference_latency_seconds_bucket[1m])))"}]},
+        {"type": "timeseries", "title": "CPU par pod (cœurs)",
+         "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+         "datasource": {"type": "prometheus", "uid": "gmp"},
+         "targets": [{"refId": "A", "legendFormat": "{{pod_name}}",
+           "expr": "sum by (pod_name) (rate(kubernetes_io:container_cpu_core_usage_time{monitored_resource=\"k8s_container\", container_name=\"api\"}[1m]))"}]},
+        {"type": "stat", "title": "Pods de l'API qui répondent",
+         "gridPos": {"h": 8, "w": 6, "x": 12, "y": 8},
+         "datasource": {"type": "prometheus", "uid": "gmp"},
+         "targets": [{"refId": "A", "expr": "sum(up{job=\"dss-api\"})"}]},
+        {"type": "stat", "title": "Part de messages toxiques (5 min)",
+         "gridPos": {"h": 8, "w": 6, "x": 18, "y": 8},
+         "datasource": {"type": "prometheus", "uid": "gmp"},
+         "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+         "targets": [{"refId": "A",
+           "expr": "1 - sum(rate(dss_score_toxicite_bucket{le=\"50.0\"}[5m])) / sum(rate(dss_score_toxicite_count[5m]))"}]},
+        {"type": "timeseries", "title": "Requêtes vers des routes inexistantes (scan)",
+         "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+         "datasource": {"type": "prometheus", "uid": "gmp"},
+         "targets": [{"refId": "A", "legendFormat": "code {{status}}",
+           "expr": "sum by (status) (rate(http_requests_total{handler=\"none\"}[1m]))"}]}
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: supervision
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.3.0
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: mot_de_passe
+            - name: GF_USERS_ALLOW_SIGN_UP       # pas de création de compte libre
+              value: "false"
+            # Accès sans login : Grafana n'est joignable que par le tunnel privé
+            # (port-forward), et l'Aperçu Web de Cloud Shell bloque le login
+            # ("origin not allowed"). On supprime donc la page de connexion.
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "true"
+            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+              value: "Admin"
+            - name: GF_AUTH_DISABLE_LOGIN_FORM
+              value: "true"
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+          volumeMounts:
+            - name: sources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: tableaux
+              mountPath: /etc/grafana/provisioning/dashboards/fournisseur.yaml
+              subPath: fournisseur.yaml
+            - name: tableaux
+              mountPath: /var/lib/grafana/dashboards/dss-api.json
+              subPath: dss-api.json
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+      volumes:
+        - name: sources
+          configMap:
+            name: grafana-sources
+        - name: tableaux
+          configMap:
+            name: grafana-tableaux
+---
+# ClusterIP : Grafana n'est joignable que depuis l'intérieur du cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: supervision
+spec:
+  type: ClusterIP
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000
