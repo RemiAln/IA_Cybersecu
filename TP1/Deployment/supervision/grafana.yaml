@@ -80,12 +80,7 @@ data:
          "datasource": {"type": "prometheus", "uid": "gmp"},
          "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
          "targets": [{"refId": "A",
-           "expr": "1 - sum(rate(dss_score_toxicite_bucket{le=\"50.0\"}[5m])) / sum(rate(dss_score_toxicite_count[5m]))"}]},
-        {"type": "timeseries", "title": "Requêtes vers des routes inexistantes (scan)",
-         "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
-         "datasource": {"type": "prometheus", "uid": "gmp"},
-         "targets": [{"refId": "A", "legendFormat": "code {{status}}",
-           "expr": "sum by (status) (rate(http_requests_total{handler=\"none\"}[1m]))"}]}
+           "expr": "1 - sum(rate(dss_score_toxicite_bucket{le=\"50.0\"}[5m])) / sum(rate(dss_score_toxicite_count[5m]))"}]}
       ]
     }
 ---
