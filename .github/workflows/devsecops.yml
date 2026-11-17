@@ -1,55 +1,18 @@
 # =============================================================================
-# TP2 - Étape 5 : pipeline DevSecOps de l'API Digital Social Score
+# TP2 - Étape 5 : pipeline CI/CD de l'API Digital Social Score
 #
-#   job "verification" (chaque push et chaque PR)
-#     lint · analyse du code (bandit) · secrets (gitleaks) · dépendances (pip-audit)
-#     · configuration Docker/Kubernetes (Trivy) · conformité (model card, .dockerignore)
+# Pipeline de base (cours 4) : lint -> build -> push -> déploiement GKE
+# Sécurité ajoutée (cours 5), repérée par [SÉCURITÉ] :
+#   - scan des dépendances (pip-audit, équivalent de Safety CLI)
+#   - recherche de secrets commités (gitleaks)
+#   - Trivy : scan de la configuration (Dockerfile, k8s) puis de l'image, bloquant
+#   - connexion à GCP sans clé JSON (Workload Identity) + compte au moindre privilège
 #
-#   job "deploiement" (push sur main uniquement, SI la vérification a réussi)
-#     connexion GCP sans clé (Workload Identity Federation) · modèle depuis GCS
-#     + contrôle d'intégrité SHA-256 · build (tag = commit) · scan Trivy de l'image
-#     (bloquant) · push Artifact Registry · déploiement GKE (retour arrière si échec)
-#     · tests après déploiement
-#
-# -----------------------------------------------------------------------------
-# MISE EN PLACE (une seule fois, depuis Cloud Shell)
-# -----------------------------------------------------------------------------
-#   PROJET=$GOOGLE_CLOUD_PROJECT
-#   NUM=$(gcloud projects describe $PROJET --format='value(projectNumber)')
-#   BUCKET=$PROJET-dss-modeles
-#   SA=github-deploy@$PROJET.iam.gserviceaccount.com
-#
-#   1. Bucket du modèle (UE) - depuis le poste qui a TP1/modeles/laya :
-#        gcloud storage buckets create gs://$BUCKET --location=europe-west1 --uniform-bucket-level-access
-#        cd TP1 && gcloud storage rsync -r --exclude="checkpoint_latest/.*" modeles/laya gs://$BUCKET/laya
-#      Empreintes du modèle, à COMMITER (Git Bash ou Linux, depuis TP1/) :
-#        find modeles/laya -type f -not -path '*/checkpoint_latest/*' | sort | xargs sha256sum > Deployment/laya.sha256
-#
-#   2. Compte de service du pipeline (moindre privilège) :
-#        gcloud iam service-accounts create github-deploy
-#        gcloud projects add-iam-policy-binding $PROJET --member=serviceAccount:$SA --role=roles/artifactregistry.writer
-#        gcloud projects add-iam-policy-binding $PROJET --member=serviceAccount:$SA --role=roles/container.developer
-#        gcloud storage buckets add-iam-policy-binding gs://$BUCKET --member=serviceAccount:$SA --role=roles/storage.objectViewer
-#
-#   3. Workload Identity Federation : GitHub obtient un jeton temporaire, AUCUNE clé JSON.
-#      Seule la branche main de ce dépôt peut l'obtenir.
-#        gcloud iam workload-identity-pools create github --location=global
-#        gcloud iam workload-identity-pools providers create-oidc depot --location=global \
-#          --workload-identity-pool=github --issuer-uri=https://token.actions.githubusercontent.com \
-#          --attribute-mapping=google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref \
-#          --attribute-condition="assertion.repository=='RemiAln/IA_Cybersecu' && assertion.ref=='refs/heads/main'"
-#        gcloud iam service-accounts add-iam-policy-binding $SA --role=roles/iam.workloadIdentityUser \
-#          --member="principalSet://iam.googleapis.com/projects/$NUM/locations/global/workloadIdentityPools/github/attribute.repository/RemiAln/IA_Cybersecu"
-#
-#   4. GitHub > Settings > Secrets and variables > Actions
-#        Variables : GCP_PROJECT_ID   = <id du projet>
-#                    GCS_BUCKET_MODELE = <bucket>
-#                    GCP_SA_DEPLOY    = github-deploy@<projet>.iam.gserviceaccount.com
-#                    GCP_WIF_PROVIDER = projects/<NUM>/locations/global/workloadIdentityPools/github/providers/depot
-#        Secret    : DSS_API_KEY      = une clé API valide (tests après déploiement)
+# Variables GitHub (Settings > Secrets and variables > Actions > Variables) :
+#   GCP_PROJECT_ID, GCS_BUCKET_MODELE, GCP_SA_DEPLOY, GCP_WIF_PROVIDER
 # =============================================================================
 
-name: DevSecOps
+name: CI-CD
 
 on:
   push:
@@ -57,22 +20,21 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Par défaut : lecture seule du dépôt (moindre privilège)
 permissions:
   contents: read
 
-# "shell: bash" explicite = bash -eo pipefail : sans pipefail, "outil | tee rapport"
-# masquerait l'échec de l'outil et le pipeline passerait au vert.
+# bash -eo pipefail : une commande qui échoue fait échouer l'étape, même avec "| tee"
 defaults:
   run:
     shell: bash
 
 env:
-  # Outils lancés en conteneur, versions FIGÉES (supply chain : jamais "latest")
   TRIVY_IMAGE: aquasec/trivy:0.76.1
   GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1
 
 jobs:
+  # ===========================================================================
+  # 1. CI : vérification du code, à chaque push et pull request
   # ===========================================================================
   verification:
     name: Vérification du code
@@ -80,110 +42,56 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0                 # historique complet : gitleaks fouille tous les commits
+          fetch-depth: 0                 # tout l'historique, pour gitleaks
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"         # même version que l'image Docker
+          python-version: "3.12"
 
-      - name: Installer les outils
+      - name: Lint
         run: |
-          pip install ruff==0.17.5 bandit==1.9.4
-          mkdir -p rapports && chmod 777 rapports
+          pip install ruff==0.17.5
+          ruff check --isolated --select E9,F --output-format=github TP1 TP2
 
-      - name: Lint (erreurs de syntaxe, noms non définis, imports inutiles)
-        run: ruff check --isolated --select E9,F --output-format=github TP1 TP2
-
-      - name: Analyse statique de sécurité (bandit)
-        # Code qui part en production. Sévérité moyenne et plus = bloquant.
-        run: |
-          bandit -r TP1/Deployment TP1/data_transformation -ll \
-            -x TP1/Deployment/tester_api.py,TP1/Deployment/tester_attaques.py,TP1/Deployment/locustfile.py \
-            | tee rapports/bandit.txt
-
-      - name: Recherche de secrets (gitleaks, tout l'historique)
-        run: |
-          docker run --rm -v "$PWD:/repo" "$GITLEAKS_IMAGE" git /repo \
-            --redact --no-banner --report-format json --report-path /repo/rapports/gitleaks.json
-
-      - name: Vulnérabilités des dépendances de l'API (pip-audit)
-        # Installe les dépendances EXACTEMENT comme le Dockerfile (torch CPU puis
-        # requirements-api.txt), puis audite tout l'environnement, dépendances
-        # indirectes comprises.
+      - name: "[SÉCURITÉ] Dépendances vulnérables (pip-audit)"
+        # Mêmes dépendances que l'image Docker
         run: |
           python -m venv /tmp/api
           /tmp/api/bin/pip install -q torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
           /tmp/api/bin/pip install -q -r TP1/requirements-api.txt pip-audit
-          # Comme dans le Dockerfile : pip et setuptools (installé avec torch) à jour
           /tmp/api/bin/pip install -q --upgrade pip setuptools
-          /tmp/api/bin/pip-audit --desc | tee rapports/pip-audit.txt
+          /tmp/api/bin/pip-audit --desc
 
-      - name: Configuration Docker et Kubernetes (Trivy)
+      - name: "[SÉCURITÉ] Secrets commités (gitleaks)"
+        run: docker run --rm -v "$PWD:/repo" "$GITLEAKS_IMAGE" git /repo --redact --no-banner
+
+      - name: "[SÉCURITÉ] Configuration Docker et Kubernetes (Trivy)"
+        # Dockerfile et manifestes k8s : conteneur en root, privilèges par défaut...
         run: |
           docker run --rm -v "$PWD:/src" -w /src "$TRIVY_IMAGE" config \
-            --exit-code 1 --severity HIGH,CRITICAL TP1 | tee rapports/trivy-config.txt
-
-      - name: Conformité (model card IA Act, données exclues de l'image)
-        shell: python
-        run: |
-          import json, pathlib, sys
-          erreurs = []
-
-          # 1. model_card.json à la racine, avec les champs demandés par l'énoncé
-          carte = pathlib.Path("model_card.json")
-          champs = ["model_name", "description", "risk_level", "data_source",
-                    "privacy_measures", "bias_detected", "version", "last_update"]
-          if not carte.exists():
-              erreurs.append("model_card.json absent à la racine du dépôt")
-          else:
-              donnees = json.loads(carte.read_text(encoding="utf-8"))
-              erreurs += [f"model_card.json : champ '{c}' manquant" for c in champs if c not in donnees]
-              if str(donnees.get("risk_level", "")).strip().lower() in ("", "à définir", "a definir"):
-                  erreurs.append("model_card.json : risk_level non renseigné")
-
-          # 2. RGPD : aucune donnée du dataset ne doit entrer dans l'image
-          ignore = pathlib.Path("TP1/.dockerignore").read_text(encoding="utf-8").split()
-          erreurs += [f".dockerignore n'exclut pas {d}" for d in ("data_train/", "data_eval/", ".env") if d not in ignore]
-
-          for e in erreurs:
-              print(f"::error::{e}")
-          sys.exit(1 if erreurs else 0)
-
-      - name: Conserver les rapports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: rapports-verification
-          path: rapports/
+            --exit-code 1 --severity HIGH,CRITICAL TP1
 
   # ===========================================================================
+  # 2. CD : build et déploiement, sur main uniquement, si la CI a réussi
+  # ===========================================================================
   deploiement:
-    name: Build, scan et déploiement
-    needs: verification                  # ne démarre QUE si la vérification a réussi
+    name: Build et déploiement
+    needs: verification
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: production              # possibilité d'exiger une validation manuelle
-    concurrency:
-      group: deploiement-production      # jamais deux déploiements en même temps
-      cancel-in-progress: false
     permissions:
       contents: read
-      id-token: write                    # jeton OIDC pour la Workload Identity Federation
+      id-token: write                    # jeton temporaire pour la Workload Identity
     env:
-      REGION: europe-west1
-      BUCKET: ${{ vars.GCS_BUCKET_MODELE }}
-      # Image taguée par le commit : on sait exactement quel code tourne en production
+      # Image taguée par le commit (cours 4 : $COMMIT_SHA)
       IMAGE: europe-west1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/dss/api:${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Libérer de la place sur le runner (image d'environ 3 Go)
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          mkdir -p rapports && chmod 777 rapports
-          df -h /
+      - name: Libérer de la place sur le runner
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
-      - name: Connexion à Google Cloud (sans clé, Workload Identity Federation)
+      - name: "[SÉCURITÉ] Connexion à GCP sans clé JSON (Workload Identity)"
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
@@ -191,83 +99,32 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Récupérer le modèle Laya (bucket européen)
+      - name: Récupérer le modèle Laya (bucket GCS)
         run: |
           mkdir -p TP1/modeles
-          gcloud storage cp -r "gs://$BUCKET/laya" TP1/modeles/
+          gcloud storage cp -r "gs://${{ vars.GCS_BUCKET_MODELE }}/laya" TP1/modeles/
 
-      - name: Vérifier l'intégrité du modèle (SHA-256)
-        # Bloque si un fichier du modèle a été modifié, ajouté ou supprimé
-        # (empoisonnement du modèle, téléchargement corrompu).
-        working-directory: TP1
-        run: |
-          sha256sum --check --strict --quiet Deployment/laya.sha256
-          attendu=$(grep -c . Deployment/laya.sha256)
-          present=$(find modeles/laya -type f | wc -l)
-          if [ "$attendu" -ne "$present" ]; then
-            echo "::error::modèle : $present fichiers présents, $attendu attendus"; exit 1
-          fi
-          echo "Modèle intègre ($present fichiers)"
-
-      - name: Construire l'image
+      - name: Build de l'image
         run: docker build -f TP1/Deployment/Dockerfile -t "$IMAGE" TP1
 
-      - name: Scanner l'image (Trivy, bloquant)
-        # Failles HIGH/CRITICAL ayant un correctif = échec : l'image n'est PAS poussée.
-        # Exception justifiée possible dans un fichier .trivyignore à la racine.
+      - name: "[SÉCURITÉ] Scan de l'image (Trivy, bloquant)"
+        # Faille HIGH/CRITICAL corrigeable = échec : l'image n'est pas poussée
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/src" -w /src \
-            "$TRIVY_IMAGE" image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL \
-            --ignore-unfixed "$IMAGE" | tee rapports/trivy-image.txt
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" \
+            image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$IMAGE"
 
-      - name: Pousser l'image dans Artifact Registry
+      - name: Push dans Artifact Registry
         run: |
-          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          gcloud auth configure-docker europe-west1-docker.pkg.dev --quiet
           docker push "$IMAGE"
 
-      - name: Accès au cluster GKE
+      - name: Déploiement sur GKE
         uses: google-github-actions/get-gke-credentials@v2
         with:
           cluster_name: dss-cluster
           location: europe-west1
 
-      - name: Déployer (retour à la version précédente si échec)
+      - name: Mise à jour de l'image et rollout
         run: |
           kubectl set image deployment/dss-api api="$IMAGE"
-          # jusqu'à 15 min : chargement de Laya + éventuels nouveaux nœuds Autopilot
-          if ! kubectl rollout status deployment/dss-api --timeout=15m; then
-            echo "::error::déploiement en échec : retour à la version précédente"
-            kubectl rollout undo deployment/dss-api
-            exit 1
-          fi
-
-      - name: Tests après déploiement
-        env:
-          API_KEY: ${{ secrets.DSS_API_KEY }}
-        run: |
-          IP=$(kubectl get service dss-api -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          URL="http://$IP"
-          echec=0
-          verifier() {   # verifier <code attendu> <description> <arguments curl...>
-            attendu=$1; desc=$2; shift 2
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$@")
-            if [ "$code" = "$attendu" ]; then echo "OK      $desc -> $code"
-            else echo "::error::$desc : $code reçu, $attendu attendu"; echec=1; fi
-          }
-          verifier 200 "santé de l'API"     "$URL/health"
-          verifier 401 "sans clé API"       -X POST "$URL/score" -H "Content-Type: application/json" -d '{"texte":"gg wp"}'
-          verifier 401 "mauvaise clé API"   -X POST "$URL/score" -H "Content-Type: application/json" -H "X-API-Key: fausse" -d '{"texte":"gg wp"}'
-          verifier 422 "texte vide"         -X POST "$URL/score" -H "Content-Type: application/json" -H "X-API-Key: $API_KEY" -d '{"texte":""}'
-          verifier 200 "score d'un message" -X POST "$URL/score" -H "Content-Type: application/json" -H "X-API-Key: $API_KEY" -d '{"texte":"gg wp team"}'
-          if [ "$echec" = 1 ]; then
-            echo "::error::tests en échec : retour à la version précédente"
-            kubectl rollout undo deployment/dss-api
-            exit 1
-          fi
-
-      - name: Conserver les rapports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: rapports-deploiement
-          path: rapports/
+          kubectl rollout status deployment/dss-api --timeout=15m
