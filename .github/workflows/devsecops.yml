@@ -9,7 +9,7 @@
 #   - connexion à GCP sans clé JSON (Workload Identity) + compte au moindre privilège
 #
 # Variables GitHub (Settings > Secrets and variables > Actions > Variables) :
-#   GCP_PROJECT_ID, GCS_BUCKET_MODELE, GCP_SA_DEPLOY, GCP_WIF_PROVIDER
+#   GCP_PROJECT_ID, MODELE_IMAGE (ex. api:v3), GCP_SA_DEPLOY, GCP_WIF_PROVIDER
 # =============================================================================
 
 name: CI-CD
@@ -99,10 +99,18 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Récupérer le modèle Laya (bucket GCS)
+      - name: Récupérer le modèle Laya (depuis une image déjà publiée)
+        # Le modèle (~650 Mo) n'est pas dans Git : on le copie depuis une image
+        # existante d'Artifact Registry, qui le contient dans /app/modeles/laya.
         run: |
+          gcloud auth configure-docker europe-west1-docker.pkg.dev --quiet
+          SOURCE="europe-west1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/dss/${{ vars.MODELE_IMAGE }}"
+          docker pull "$SOURCE"
+          docker create --name source "$SOURCE"
           mkdir -p TP1/modeles
-          gcloud storage cp -r "gs://${{ vars.GCS_BUCKET_MODELE }}/laya" TP1/modeles/
+          docker cp source:/app/modeles/laya TP1/modeles/laya
+          docker rm source
+          docker rmi "$SOURCE"           # libère la place avant le build
 
       - name: Build de l'image
         run: docker build -f TP1/Deployment/Dockerfile -t "$IMAGE" TP1
@@ -114,9 +122,7 @@ jobs:
             image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$IMAGE"
 
       - name: Push dans Artifact Registry
-        run: |
-          gcloud auth configure-docker europe-west1-docker.pkg.dev --quiet
-          docker push "$IMAGE"
+        run: docker push "$IMAGE"
 
       - name: Déploiement sur GKE
         uses: google-github-actions/get-gke-credentials@v2
