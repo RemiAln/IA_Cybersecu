@@ -10,6 +10,8 @@ Suite du [TP1](../TP1/README.md) : attaque du modèle, défense, IA Act et pipel
 | Résultats de l'attaque | `TP2/resultats/` |
 | Défense anti-évasion (normalisation du texte) | [`TP1/Deployment/normalisation.py`](../TP1/Deployment/normalisation.py) |
 | Défense anti-extraction (limite de débit, réponse appauvrie) | [`TP1/Deployment/defenses_api.py`](../TP1/Deployment/defenses_api.py) |
+| En-têtes HTTP de sécurité | [`TP1/Deployment/en_tetes_securite.py`](../TP1/Deployment/en_tetes_securite.py) |
+| WAF (Ingress + Cloud Armor) | [`TP1/Deployment/k8s/ingress.yaml`](../TP1/Deployment/k8s/ingress.yaml) |
 | Pipeline CI/CD | [`.github/workflows/devsecops.yml`](../.github/workflows/devsecops.yml) |
 
 Les défenses sont dans `TP1/Deployment/` car elles font partie de l'API : elles sont copiées
@@ -44,9 +46,24 @@ $env:ETIQUETTE="apres_defense" ; python TP2/attack/attaque_extraction.py
 | Normalisation | leetspeak, lettres espacées, homoglyphes et caractères invisibles remis en clair avant le modèle |
 | Limite de débit | 60 requêtes par minute et par clé, puis 429 |
 | Réponse appauvrie | verdict + niveau arrondi (0, 25, 50, 75, 100) au lieu du score exact |
+| En-têtes de sécurité | `nosniff`, `X-Frame-Options`, `Content-Security-Policy`, `no-store`… sur chaque réponse ; nom du serveur masqué ([`en_tetes_securite.py`](../TP1/Deployment/en_tetes_securite.py)) |
+| WAF (Cloud Armor) | limite globale de 60 requêtes par minute et par clé, avant les pods |
 
 ```bash
 python TP1/Deployment/normalisation.py      # test de la normalisation, sans l'API
+```
+
+**WAF (Cloud Armor)** : limite de débit globale, appliquée avant les pods. L'API n'est
+joignable que par l'Ingress ([`ingress.yaml`](../TP1/Deployment/k8s/ingress.yaml)) ; le Service
+n'a plus d'IP publique.
+```bash
+gcloud compute security-policies create dss-waf
+gcloud compute security-policies rules create 1000 --security-policy=dss-waf \
+  --src-ip-ranges="*" --action=throttle --conform-action=allow --exceed-action=deny-429 \
+  --rate-limit-threshold-count=60 --rate-limit-threshold-interval-sec=60 \
+  --enforce-on-key=HTTP-HEADER --enforce-on-key-name=X-API-Key
+kubectl apply -f TP1/Deployment/k8s/service.yaml -f TP1/Deployment/k8s/ingress.yaml
+kubectl get ingress dss-api                 # nouvelle IP publique (ADDRESS), après 5 à 10 min
 ```
 
 ## Pipeline CI/CD

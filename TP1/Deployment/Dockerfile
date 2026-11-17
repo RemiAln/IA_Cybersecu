@@ -6,6 +6,10 @@
 
 FROM python:3.12-slim
 
+# Sécurité (TP2, étape 5) : correctifs de sécurité des paquets système Debian
+# (ex. zlib, faille signalée par Trivy), absents de l'image de base
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # PyTorch version CPU (~200 Mo au lieu de plus de 2 Go pour la version GPU),
@@ -28,6 +32,7 @@ COPY Deployment/api.py ./Deployment/api.py
 # réponse appauvrie anti-extraction
 COPY Deployment/normalisation.py ./Deployment/normalisation.py
 COPY Deployment/defenses_api.py ./Deployment/defenses_api.py
+COPY Deployment/en_tetes_securite.py ./Deployment/en_tetes_securite.py
 COPY data_transformation/nettoyage.py ./data_transformation/nettoyage.py
 # Modèle Laya (~650 Mo). Le sous-dossier checkpoint_latest/ (copie de sauvegarde
 # de l'entraînement, inutile pour prédire) est exclu par .dockerignore / .gcloudignore.
@@ -44,4 +49,5 @@ USER 10001
 
 # Port d'écoute de l'API dans le conteneur (8080)
 ENV PORT=8080
-CMD exec uvicorn Deployment.api:app --host 0.0.0.0 --port ${PORT}
+# --no-server-header : ne plus annoncer "uvicorn" dans les réponses (repéré par nmap)
+CMD exec uvicorn Deployment.api:app --host 0.0.0.0 --port ${PORT} --no-server-header

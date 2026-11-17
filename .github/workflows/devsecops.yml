@@ -116,9 +116,10 @@ jobs:
         run: docker build -f TP1/Deployment/Dockerfile -t "$IMAGE" TP1
 
       - name: "[SÉCURITÉ] Scan de l'image (Trivy, bloquant)"
-        # Faille HIGH/CRITICAL corrigeable = échec : l'image n'est pas poussée
+        # Faille HIGH/CRITICAL corrigeable = échec : l'image n'est pas poussée.
+        # Exceptions justifiées : fichier .trivyignore à la racine du dépôt.
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" \
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/src" -w /src "$TRIVY_IMAGE" \
             image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$IMAGE"
 
       - name: Push dans Artifact Registry

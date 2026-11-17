@@ -1,18 +1,22 @@
-# Service : donne une adresse IP publique à l'API et répartit les requêtes
-# entre les copies (pods) du Deployment -> c'est le load balancer.
+# Service : répartit les requêtes entre les pods de l'API.
 #
-# Remarque (étape 4) : l'API est exposée en HTTP. Le HTTPS n'a pas été mis en
-# place dans le cadre du TP (consigne de l'enseignant) ; voir le rapport pour
-# la solution prévue (Ingress + certificat géré par Google).
+# TP2 (WAF) : le Service n'a PLUS d'IP publique (ClusterIP). La seule entrée est
+# l'Ingress (ingress.yaml), protégé par Cloud Armor : impossible de contourner
+# le WAF en appelant directement l'ancienne IP.
 
 apiVersion: v1
 kind: Service
 metadata:
   name: dss-api
+  annotations:
+    # le load balancer de l'Ingress envoie le trafic directement aux pods
+    cloud.google.com/neg: '{"ingress": true}'
+    # règles Cloud Armor + sonde de santé : voir BackendConfig dans ingress.yaml
+    cloud.google.com/backend-config: '{"default": "dss-api"}'
 spec:
-  type: LoadBalancer               # GCP crée un équilibreur de charge avec une IP publique
+  type: ClusterIP                  # interne au cluster
   selector:
-    app: dss-api                   # envoie le trafic aux pods qui portent ce label
+    app: dss-api
   ports:
-    - port: 80                     # port public  : http://<IP>/score
+    - port: 80
       targetPort: 8080             # port de l'API dans le conteneur

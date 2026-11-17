@@ -1,0 +1,30 @@
+# TP2 - WAF : point d'entrée public de l'API, protégé par Cloud Armor.
+#
+#   Client -> Ingress (load balancer HTTP de Google) + Cloud Armor -> Service -> pods
+#
+# La politique Cloud Armor "dss-waf" est créée à part avec gcloud (voir README TP2).
+
+# BackendConfig : réglages du load balancer pour le Service dss-api
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: dss-api
+spec:
+  securityPolicy:
+    name: dss-waf                  # politique Cloud Armor (WAF)
+  healthCheck:                     # le load balancer vérifie /health (et non "/")
+    type: HTTP
+    requestPath: /health
+    port: 8080
+  timeoutSec: 60
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dss-api
+spec:
+  defaultBackend:
+    service:
+      name: dss-api
+      port:
+        number: 80

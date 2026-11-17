@@ -49,6 +49,7 @@ from pydantic import BaseModel, Field
 from data_transformation.nettoyage import nettoyer
 from Deployment.normalisation import normaliser   # TP2 étape 3 : défense anti-adversarial
 from Deployment.defenses_api import reponse_sure, verifier_debit  # TP2 étape 3 : défense anti-extraction
+from Deployment.en_tetes_securite import ajouter_entetes_securite  # TP2 : en-têtes de sécurité
 
 DOSSIER_MODELE = "modeles/laya"   # relatif à la racine du projet (ou /app dans le conteneur)
 LONGUEUR_MAX = 128                # identique à l'entraînement (modele_laya.py)
@@ -136,6 +137,7 @@ app = FastAPI(
                 "La route /score exige une clé API (en-tête X-API-Key).",
     version="2.1",
 )
+app.middleware("http")(ajouter_entetes_securite)   # TP2 : en-têtes HTTP de sécurité
 
 # Métriques HTTP automatiques : nombre de requêtes et latence par route et par code.
 # - should_group_status_codes=False : garde 401 et 422 séparés (au lieu de "4xx"),

@@ -1,0 +1,8 @@
+# Exceptions au scan Trivy de l'image. Chaque ligne doit être justifiée.
+
+# setuptools 70.3.0 (CVE-2025-47273, path traversal dans PackageIndex) :
+# faux positif. La version installée dans l'image est 84.2.1 (corrigée, mise à
+# jour dans le Dockerfile). L'ancienne version n'apparaît que dans l'inventaire
+# (SBOM) embarqué par une bibliothèque, qui liste ses outils de construction
+# ("Third-party SBOM may lead to inaccurate vulnerability detection").
+CVE-2025-47273
