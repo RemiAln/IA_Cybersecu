@@ -151,6 +151,42 @@ kubectl apply -f Deployment/k8s/
 kubectl get service dss-api          # adresse publique dans EXTERNAL-IP
 ```
 
+### Requêtes de test
+Remplacer `<URL>` par `http://127.0.0.1:8000` (local) ou `http://<EXTERNAL-IP>` (GKE),
+et `<clé-API>` par la clé (`cle-de-test` en local).
+
+```bash
+# État de l'API (sans clé) -> 200 {"statut": "ok"}
+curl <URL>/health
+
+# Score d'un message -> 200 {"score": ..., "note": ..., "toxique": ...}
+curl -X POST <URL>/score -H "Content-Type: application/json" -H "X-API-Key: <clé-API>" \
+  -d '{"texte": "useless noob"}'
+
+# Sans clé ou avec une mauvaise clé -> 401
+curl -X POST <URL>/score -H "Content-Type: application/json" -d '{"texte": "gg wp"}'
+
+# Texte vide (ou plus de 1 000 caractères) -> 422
+curl -X POST <URL>/score -H "Content-Type: application/json" -H "X-API-Key: <clé-API>" \
+  -d '{"texte": ""}'
+```
+```powershell
+# Équivalent PowerShell
+Invoke-RestMethod -Method Post -Uri "<URL>/score" -Headers @{ "X-API-Key" = "<clé-API>" } `
+  -ContentType "application/json" -Body '{"texte": "useless noob"}'
+```
+| Champ de la réponse | Signification |
+|---|---|
+| `score` | 0 à 100 : probabilité, en %, que le message soit toxique |
+| `note` | gravité la plus probable, de 0 (sain) à 5 |
+| `toxique` | `true` si `score` ≥ 50 |
+
+Série complète (sans clé, mauvaise clé, texte vide, puis messages sains, ambigus et toxiques) :
+```bash
+python Deployment/tester_api.py <URL> <clé-API>
+```
+Détail des routes et des codes d'erreur : [`docs/API.md`](docs/API.md).
+
 ## Étape 4 : sécurité et conformité RGPD
 
 | Mesure | Mise en œuvre |
