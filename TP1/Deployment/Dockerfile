@@ -29,6 +29,15 @@ COPY data_transformation/nettoyage.py ./data_transformation/nettoyage.py
 # de l'entraînement, inutile pour prédire) est exclu par .dockerignore / .gcloudignore.
 COPY modeles/laya ./modeles/laya
 
+# Sécurité (TP2, étape 5) : l'API ne tourne PAS en root. Utilisateur sans shell
+# ni dossier personnel ; UID numérique pour que Kubernetes puisse vérifier
+# runAsNonRoot. Les fichiers copiés restent en lecture seule pour lui.
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin dss
+# Seul /tmp est accessible en écriture (volume monté par Kubernetes, le reste
+# du système de fichiers est en lecture seule) : caches de Hugging Face / torch.
+ENV HOME=/tmp HF_HOME=/tmp/hf PYTHONDONTWRITEBYTECODE=1
+USER 10001
+
 # Port d'écoute de l'API dans le conteneur (8080)
 ENV PORT=8080
 CMD exec uvicorn Deployment.api:app --host 0.0.0.0 --port ${PORT}

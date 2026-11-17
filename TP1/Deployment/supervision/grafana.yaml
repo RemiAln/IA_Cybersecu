@@ -99,9 +99,22 @@ spec:
       labels:
         app: grafana
     spec:
+      # Sécurité (TP2, étape 5) : utilisateur non-root de l'image Grafana (472)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: grafana
           image: grafana/grafana:11.3.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 3000
           env:
@@ -123,7 +136,14 @@ spec:
               value: "true"
             - name: GF_ANALYTICS_REPORTING_ENABLED
               value: "false"
+            - name: GF_LOG_MODE                  # journaux sur la sortie standard, pas dans un fichier
+              value: "console"
           volumeMounts:
+            # Système de fichiers en lecture seule : seuls ces dossiers sont modifiables
+            - name: donnees
+              mountPath: /var/lib/grafana
+            - name: tmp
+              mountPath: /tmp
             - name: sources
               mountPath: /etc/grafana/provisioning/datasources
             - name: tableaux
@@ -141,6 +161,10 @@ spec:
               path: /api/health
               port: 3000
       volumes:
+        - name: donnees                  # base interne de Grafana (recréée au redémarrage)
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
         - name: sources
           configMap:
             name: grafana-sources

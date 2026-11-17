@@ -19,9 +19,29 @@ spec:
       labels:
         app: dss-api
     spec:
+      # Sécurité (TP2, étape 5) : le pod tourne avec l'utilisateur non-root de
+      # l'image (UID 10001) et le filtre d'appels système par défaut (seccomp).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: tmp                      # seul dossier accessible en écriture
+          emptyDir:
+            sizeLimit: 1Gi
       containers:
         - name: api
           image: europe-west1-docker.pkg.dev/MON_PROJET/dss/api:v1
+          securityContext:
+            allowPrivilegeEscalation: false   # impossible de redevenir root
+            readOnlyRootFilesystem: true      # impossible de modifier le code ou le modèle
+            capabilities:
+              drop: ["ALL"]                   # aucun privilège système
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           ports:
             - containerPort: 8080      # API (exposée par le Service)
             - name: metriques          # métriques Prometheus (étape 6) : PAS exposé
