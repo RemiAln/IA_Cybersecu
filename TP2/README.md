@@ -53,17 +53,14 @@ $env:ETIQUETTE="apres_defense" ; python TP2/attack/attaque_extraction.py
 python TP1/Deployment/normalisation.py      # test de la normalisation, sans l'API
 ```
 
-**WAF (Cloud Armor)** : limite de débit globale, appliquée avant les pods. L'API n'est
-joignable que par l'Ingress ([`ingress.yaml`](../TP1/Deployment/k8s/ingress.yaml)) ; le Service
-n'a plus d'IP publique.
+**WAF (Cloud Armor)** : limite de débit globale (60 requêtes/min par clé), appliquée avant
+les pods. Règle dans [`waf.sh`](../TP1/Deployment/k8s/waf.sh), branchée par
+[`ingress.yaml`](../TP1/Deployment/k8s/ingress.yaml). Le Service n'a plus d'IP publique.
 ```bash
-gcloud compute security-policies create dss-waf
-gcloud compute security-policies rules create 1000 --security-policy=dss-waf \
-  --src-ip-ranges="*" --action=throttle --conform-action=allow --exceed-action=deny-429 \
-  --rate-limit-threshold-count=60 --rate-limit-threshold-interval-sec=60 \
-  --enforce-on-key=HTTP-HEADER --enforce-on-key-name=X-API-Key
-kubectl apply -f TP1/Deployment/k8s/service.yaml -f TP1/Deployment/k8s/ingress.yaml
-kubectl get ingress dss-api                 # nouvelle IP publique (ADDRESS), après 5 à 10 min
+cd TP1/Deployment/k8s
+bash waf.sh                                  # crée ou met à jour la règle Cloud Armor
+kubectl apply -f service.yaml -f ingress.yaml
+kubectl get ingress dss-api                  # nouvelle IP publique (ADDRESS), après 5 à 10 min
 ```
 
 ## Pipeline CI/CD

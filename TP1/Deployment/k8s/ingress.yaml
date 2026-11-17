@@ -17,6 +17,9 @@ spec:
     requestPath: /health
     port: 8080
   timeoutSec: 60
+  logging:                         # journal de chaque requête (dont les blocages du WAF)
+    enable: true
+    sampleRate: 1.0
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
