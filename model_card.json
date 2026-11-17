@@ -1,0 +1,26 @@
+{
+  "model_name": "Digital Social Score v2",
+  "description": "Détection de propos toxiques dans un texte : reçoit un message de chat de jeu vidéo et renvoie un verdict (toxique / non toxique) avec un niveau de toxicité",
+  "model_type": "Laya (modèle de décision multilingue), ajusté sur GameTox",
+  "intended_use": "Aide à la modération du chat d'un jeu vidéo, sous le contrôle d'un modérateur humain. Note des messages isolés, jamais des personnes",
+  "risk_level": "limité",
+  "risk_justification": "Modération de contenu dans un jeu vidéo (exemple de la catégorie « risque limité » de l'IA Act). Aucun domaine à risque élevé (emploi, santé, éducation, justice). Pas de scoring social : un score est attribué à un message, jamais à un joueur",
+  "data_source": "GameTox : jeu de données public de messages de chat de jeu vidéo, anonymisé avant l'entraînement",
+  "privacy_measures": [
+    "anonymisation",
+    "pseudonymisation des pseudos (HMAC)",
+    "texte des requêtes jamais stocké",
+    "logs pseudonymisés",
+    "chiffrement logs",
+    "hébergement dans l'UE (europe-west1)"
+  ],
+  "transparency": "Les joueurs sont informés que la modération est assistée par une IA",
+  "bias_detected": true,
+  "bias_notes": [
+    "fiable surtout en anglais",
+    "reproduit les choix d'annotation de GameTox",
+    "gravité de la toxicité peu fiable"
+  ],
+  "version": "2.1",
+  "last_update": "2026-11-17"
+}

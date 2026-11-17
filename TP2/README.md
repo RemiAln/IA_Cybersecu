@@ -13,6 +13,7 @@ Suite du [TP1](../TP1/README.md) : attaque du modèle, défense, IA Act et pipel
 | En-têtes HTTP de sécurité | [`TP1/Deployment/en_tetes_securite.py`](../TP1/Deployment/en_tetes_securite.py) |
 | WAF (Ingress + Cloud Armor) | [`TP1/Deployment/k8s/ingress.yaml`](../TP1/Deployment/k8s/ingress.yaml) |
 | Pipeline CI/CD | [`.github/workflows/devsecops.yml`](../.github/workflows/devsecops.yml) |
+| Model card (IA Act) | [`model_card.json`](../model_card.json), à la racine du dépôt |
 
 Les défenses sont dans `TP1/Deployment/` car elles font partie de l'API : elles sont copiées
 dans l'image Docker avec `api.py`.
