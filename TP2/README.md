@@ -28,7 +28,7 @@ pip install -r TP1/requirements.txt -r TP2/requirements.txt
 ## Attaque
 
 ```powershell
-$env:API_URL="http://<EXTERNAL-IP>/score" ; $env:API_KEY="<clé>"
+$env:API_URL="http://34.36.74.177/score" ; $env:API_KEY="<clé>"
 python TP2/attack/attaque_extraction.py
 ```
 Le script interroge l'API, entraîne une copie du modèle (100 à 2 000 requêtes) et mesure sa

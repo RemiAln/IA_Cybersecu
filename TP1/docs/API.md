@@ -11,7 +11,7 @@ le jeu de données GameTox (messages de chat de jeu vidéo), et tourne sur
 
 | Élément | Valeur |
 |---|---|
-| URL de base | `http://<EXTERNAL-IP>` (adresse du Service `dss-api` : `kubectl get service dss-api`) |
+| URL de base | `http://34.36.74.177` (adresse de l'Ingress, derrière le WAF : `kubectl get ingress dss-api`) |
 | Protocole | HTTP (voir [Limites](#6-limites-connues)) |
 | Format | JSON (`Content-Type: application/json`) |
 | Documentation interactive | `http://<EXTERNAL-IP>/docs` (générée automatiquement par FastAPI) |

@@ -73,12 +73,15 @@ gcloud builds submit --config Deployment/cloudbuild.yaml \
 gcloud container clusters create-auto dss-cluster --region europe-west1
 kubectl create secret generic dss-secrets \
   --from-literal=API_KEY=$(openssl rand -hex 24) --from-literal=LOG_SALT=$(openssl rand -hex 32)
+bash Deployment/k8s/waf.sh                 # WAF Cloud Armor (TP2), avant l'Ingress
 kubectl apply -f Deployment/k8s/
-kubectl get service dss-api                # IP publique : EXTERNAL-IP
+kubectl get ingress dss-api                # IP publique : ADDRESS
 ```
 Les mises à jour suivantes sont déployées par le pipeline GitHub Actions (voir [TP2](../TP2/README.md)).
 
-**Requêtes de test**
+**Adresse actuelle de l'API : http://34.36.74.177** (via l'Ingress et le WAF).
+
+**Requêtes de test** (`<URL>` = adresse de l'API)
 ```bash
 curl <URL>/health                                                     # 200
 curl -X POST <URL>/score -H "Content-Type: application/json" \
