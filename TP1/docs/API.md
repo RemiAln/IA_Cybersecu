@@ -57,13 +57,19 @@ Calcule le score de toxicité d'un texte.
 
 | Champ | Type | Description |
 |---|---|---|
-| `score` | nombre (0 à 100) | probabilité, estimée par le modèle, que le message soit toxique, en % |
-| `note` | entier (0 à 5) | gravité la plus probable : 0 = sain, 1 = insulte, 2 = autre propos offensant, 3 = haine / harcèlement, 4 = menace, 5 = extrémisme |
-| `toxique` | booléen | `true` si `score` ≥ 50 |
+| `toxique` | booléen | `true` si le message est jugé toxique (probabilité ≥ 50 %) |
+| `niveau` | entier (0, 25, 50, 75 ou 100) | probabilité de toxicité, arrondie au palier de 25 le plus proche |
 
 ```json
-{ "score": 98.4, "note": 1, "toxique": true }
+{ "toxique": true, "niveau": 100 }
 ```
+
+Le score exact n'est volontairement pas renvoyé : il aidait un attaquant à copier le
+modèle (attaque par extraction). Il reste connu en interne (journaux, métriques).
+
+**Limite de débit** : 60 requêtes par minute et par clé API. Au-delà, l'API répond
+**429** avec un en-tête `Retry-After` (secondes à attendre). La limite est comptée par
+pod : avec plusieurs pods, la limite réelle est un peu plus haute.
 
 ### `GET /health` : état de l'API
 Vérifie que l'API est démarrée et que le modèle est chargé. **Pas de clé requise** :
@@ -82,21 +88,24 @@ cette route est utilisée par Kubernetes pour surveiller les pods.
 | **200** | Succès | le score est renvoyé |
 | **401** | Non autorisé | clé API absente ou invalide : `{"detail": "Clé API absente ou invalide"}` |
 | **422** | Entrée invalide | champ `texte` absent, vide ou de plus de 1 000 caractères |
+| **429** | Trop de requêtes | plus de 60 requêtes par minute avec la même clé ; réessayer après `Retry-After` secondes |
 
 ---
 
 ## 4. Interpréter le score
 
-| Score | Lecture |
+| `niveau` | Lecture |
 |---|---|
-| proche de 0 | le modèle est sûr que le message est **sain** |
-| autour de 50 | le modèle **hésite** (message ambigu, ironie, langue étrangère…) |
-| proche de 100 | le modèle est sûr que le message est **toxique** |
+| 0 ou 25 | le modèle juge le message **sain** |
+| 50 | le modèle **hésite** (message ambigu, ironie, langue étrangère…) |
+| 75 ou 100 | le modèle juge le message **toxique** |
 
-Le score mesure **la probabilité qu'un message soit toxique, pas sa gravité**. La gravité
-est donnée par `note`, mais elle est peu fiable pour les niveaux élevés : le jeu
-d'entraînement contient très peu de menaces ou de propos extrémistes. Une insulte et une
-incitation au suicide peuvent ainsi obtenir des scores proches.
+Le niveau mesure **la probabilité qu'un message soit toxique, pas sa gravité**. Une insulte
+et une incitation au suicide peuvent ainsi obtenir le même niveau.
+
+Avant l'analyse, le texte est « démasqué » : leetspeak (`1d10t`), lettres espacées
+(`i d i o t`), lettres cyrilliques déguisées et caractères invisibles sont remis en clair.
+Un message déguisé obtient donc le même verdict que sa version normale.
 
 ---
 

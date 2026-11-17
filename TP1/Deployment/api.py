@@ -47,6 +47,8 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
 
 from data_transformation.nettoyage import nettoyer
+from Deployment.normalisation import normaliser   # TP2 étape 3 : défense anti-adversarial
+from Deployment.defenses_api import reponse_sure, verifier_debit  # TP2 étape 3 : défense anti-extraction
 
 DOSSIER_MODELE = "modeles/laya"   # relatif à la racine du projet (ou /app dans le conteneur)
 LONGUEUR_MAX = 128                # identique à l'entraînement (modele_laya.py)
@@ -198,9 +200,11 @@ class Requete(BaseModel):
 
 
 class Reponse(BaseModel):
-    score: float           # 0 à 100 = probabilité que le message soit toxique, en %
-    note: int              # gravité la plus probable, de 0 (sain) à 5
-    toxique: bool          # True si score >= 50
+    # Défense anti-extraction (TP2 étape 3) : on n'expose plus le score EXACT, qui
+    # aidait l'attaquant à cloner le modèle. On renvoie le verdict + un score
+    # ARRONDI (0, 25, 50, 75, 100), qui reste informatif mais sans le détail fin.
+    toxique: bool          # True si le message est jugé toxique
+    niveau: int            # score grossier 0 à 100 (par pas de 25)
 
 
 # ---------------------------------------------------------------------------
@@ -212,10 +216,13 @@ def health():
     return {"statut": "ok"}
 
 
-@app.post("/score", response_model=Reponse, dependencies=[Depends(verifier_cle)])
+@app.post("/score", response_model=Reponse,
+          dependencies=[Depends(verifier_cle), Depends(verifier_debit)])
 def score(requete: Requete, request: Request):
-    # 1. Même nettoyage qu'à l'entraînement (minuscules, ponctuation...)
-    texte = nettoyer(requete.texte)
+    # 1. Défense anti-adversarial (TP2 étape 3) : on "démasque" d'abord le texte
+    #    (leetspeak, lettres espacées, homoglyphes...), PUIS le nettoyage habituel.
+    #    Sans ça, un message déguisé comme "1d10t" passait à travers la modération.
+    texte = nettoyer(normaliser(requete.texte))
 
     # 2. Prédiction : probabilités des 6 notes (0 à 5)
     probas = predire(texte)
@@ -232,8 +239,7 @@ def score(requete: Requete, request: Request):
     request.state.longueur = len(requete.texte)
     SCORES.observe(score_0_100)              # métrique Prometheus (étape 6)
 
-    return Reponse(
-        score=score_0_100,
-        note=int(probas.argmax()),
-        toxique=p_toxique >= SEUIL_TOXIQUE,
-    )
+    # Réponse APPAUVRIE (défense anti-extraction) : verdict + score arrondi.
+    # Le score exact reste connu en interne (journal, métriques) mais n'est plus
+    # renvoyé au client. reponse_sure() applique l'arrondi.
+    return Reponse(**reponse_sure(score_0_100, seuil=50.0, mode="arrondi"))

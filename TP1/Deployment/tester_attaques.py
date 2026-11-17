@@ -38,7 +38,8 @@ def envoyer(texte, cle=VRAIE_CLE):
 
 
 def afficher(texte, code, rep):
-    score = f"score {rep['score']:5.1f}  toxique={rep['toxique']}" if rep else ""
+    # Réponse appauvrie (TP2 étape 3) : verdict + niveau arrondi (0, 25, 50, 75, 100)
+    score = f"niveau {rep['niveau']:3d}  toxique={rep['toxique']}" if rep else ""
     print(f"  {str(texte)[:38]!r:40} -> HTTP {code}  {score}")
 
 

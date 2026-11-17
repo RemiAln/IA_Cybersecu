@@ -24,6 +24,10 @@ RUN pip install --no-cache-dir --upgrade pip setuptools
 # Code de l'API, fonction de nettoyage et modèle entraîné uniquement :
 # aucune donnée du dataset n'est copiée.
 COPY Deployment/api.py ./Deployment/api.py
+# Défenses du TP2 (étape 3) : normalisation anti-évasion, limite de débit et
+# réponse appauvrie anti-extraction
+COPY Deployment/normalisation.py ./Deployment/normalisation.py
+COPY Deployment/defenses_api.py ./Deployment/defenses_api.py
 COPY data_transformation/nettoyage.py ./data_transformation/nettoyage.py
 # Modèle Laya (~650 Mo). Le sous-dossier checkpoint_latest/ (copie de sauvegarde
 # de l'entraînement, inutile pour prédire) est exclu par .dockerignore / .gcloudignore.
