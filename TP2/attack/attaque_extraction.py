@@ -14,6 +14,12 @@ Lancement (depuis la racine du dépôt, après avoir défini l'URL et la clé) :
     $env:API_URL="http://X.X.X.X/score" ; $env:API_KEY="la-cle-du-binome"
     python TP2/attack/attaque_extraction.py
 Résultats  :  TP2/resultats/  (metrics.csv, metrics.json, graphiques .png)
+
+Étape 3 (mesure APRÈS la défense) : donner une étiquette au lancement.
+    $env:ETIQUETTE="apres_defense" ; python TP2/attack/attaque_extraction.py
+-> fichiers metrics_apres_defense.csv, .json, .png et un cache SÉPARÉ, vide au
+   départ : l'attaque interroge vraiment l'API protégée (sinon les réponses
+   déjà en cache feraient croire que la défense ne sert à rien).
 """
 
 
@@ -74,14 +80,24 @@ MAX_RETRIES = 5        # si l'API nous limite (429/503), on réessaie X fois
 
 
 RESULTS_DIR = str(RACINE / "TP2" / "resultats")
-CACHE_FILE = os.path.join(RESULTS_DIR, "cache_reponses_api.json")
+
+# Étiquette du lancement ("" = attaque initiale, "apres_defense" = étape 3...).
+# Chaque étiquette a ses propres fichiers de résultats ET son propre cache.
+ETIQUETTE = os.getenv("ETIQUETTE", "").strip()
+SUFFIXE = f"_{ETIQUETTE}" if ETIQUETTE else ""
+CACHE_FILE = os.path.join(RESULTS_DIR, f"cache_reponses_api{SUFFIXE}.json")
+
+
+def fichier_resultat(nom, ext):
+    """metrics + .csv -> TP2/resultats/metrics_<etiquette>.csv"""
+    return os.path.join(RESULTS_DIR, f"{nom}{SUFFIXE}.{ext}")
 
 
 
 
 def build_payload(text):
-    """Format attendu par l'API cible (binôme) : {"text": "..."}."""
-    return {"text": text[:1000]}            # l'API refuse (422) au-delà de 1000 caractères
+    """Format attendu par l'API (TP1/Deployment/api.py) : {"texte": "..."}."""
+    return {"texte": text[:1000]}           # l'API refuse (422) au-delà de 1000 caractères
 
 
 
@@ -107,8 +123,8 @@ def query_api(text):
 
     Si l'API nous limite (429 Too Many Requests, ou 503), on ne plante pas :
     on attend de plus en plus longtemps puis on réessaie (backoff exponentiel).
-    C'est ce que fait un vrai attaquant pour rester sous le radar d'une
-    limite de débit -> c'est justement la défense qu'on casse à l'étape 3."""
+    C'est ce que fait un vrai attaquant face à une limite de débit : à l'étape 3,
+    on vérifie si la défense tient malgré ce comportement « patient »."""
     for essai in range(MAX_RETRIES):
         start = time.perf_counter()
         r = requests.post(API_URL, json=build_payload(text), headers=HEADERS, timeout=TIMEOUT)
@@ -133,13 +149,16 @@ def query_many(texts, n_workers, cache):
     (Laya est lent) si on relance le script."""
     todo = [t for t in texts if t not in cache]
     latencies = []
+    echecs = 0
 
 
     def worker(text):
         try:
             label, lat = query_api(text)
             return text, label, lat
-        except requests.RequestException as e:
+        # RuntimeError = requête toujours bloquée (429/503) après tous les essais :
+        # avec une défense par limite de débit, c'est normal, on ne plante pas.
+        except (requests.RequestException, RuntimeError) as e:
             print(f"  erreur API : {e}")
             return text, None, None
 
@@ -149,12 +168,14 @@ def query_many(texts, n_workers, cache):
             if label is not None:
                 cache[text] = label
                 latencies.append(lat)
+            else:
+                echecs += 1
             if i % 100 == 0:
                 print(f"  {i}/{len(todo)} requêtes envoyées")
 
 
     labels = [cache.get(t) for t in texts]
-    return labels, latencies
+    return labels, latencies, echecs
 
 
 
@@ -176,7 +197,7 @@ def metrics(y_true, y_pred):
 def main():
     if not API_KEY:
         sys.exit("Définir API_KEY (la clé de l'API cible) avant de lancer l'attaque.")
-    print(f"Cible : {API_URL}")
+    print(f"Cible : {API_URL}" + (f"   (étiquette : {ETIQUETTE})" if ETIQUETTE else ""))
     try:
         base = API_URL.rsplit("/", 1)[0]     # .../score -> ...
         requests.get(f"{base}/health", timeout=10).raise_for_status()
@@ -201,21 +222,31 @@ def main():
 
     # 1) Latence de base : quelques requêtes une par une, API "au calme"
     print(f"[1/4] Latence de base ({N_BASELINE} requêtes séquentielles)")
-    baseline_lat = [query_api(t)[1] for t in test_texts[:N_BASELINE]]
+    baseline_lat = []
+    for t in test_texts[:N_BASELINE]:
+        try:
+            baseline_lat.append(query_api(t)[1])
+        except (requests.RequestException, RuntimeError) as e:
+            print(f"  erreur API : {e}")
+    if not baseline_lat:
+        sys.exit("Aucune requête n'a abouti : vérifier la clé API et le format de la requête.")
 
 
     # 2) Réponses de Laya sur le jeu de test (référence pour comparer la copie)
     print("[2/4] Prédictions de Laya sur le jeu de test")
-    y_laya, _ = query_many(test_texts, N_WORKERS, cache)
+    y_laya, _, _ = query_many(test_texts, N_WORKERS, cache)
     y_laya = np.array([-1 if y is None else y for y in y_laya])
-    ok = y_laya != -1   # on ignore les messages où l'API a planté
+    ok = y_laya != -1   # on ignore les messages où l'API n'a pas répondu
+    if not ok.any():
+        sys.exit("L'API n'a répondu à aucun message du jeu de test.")
     laya = metrics(y_true[ok], y_laya[ok])
 
 
     # 3) L'attaque : on vole les labels de l'API
     print(f"[3/4] Attaque : {budget_max} requêtes avec {N_WORKERS} threads")
-    stolen, attack_lat = query_many(attacker_texts[:budget_max], N_WORKERS, cache)
+    stolen, attack_lat, echecs = query_many(attacker_texts[:budget_max], N_WORKERS, cache)
     json.dump(cache, open(CACHE_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+    print(f"  {echecs} requêtes de l'attaque bloquées ou en erreur")
 
 
     # 4) On entraîne une copie pour chaque budget et on la compare à Laya
@@ -244,7 +275,7 @@ def main():
 
 
     df = pd.DataFrame(rows)
-    df.to_csv(os.path.join(RESULTS_DIR, "metrics.csv"), index=False)
+    df.to_csv(fichier_resultat("metrics", "csv"), index=False)
 
 
     latence = {
@@ -253,11 +284,18 @@ def main():
         "attaque_moyenne_ms": float(np.mean(attack_lat)) if attack_lat else None,
         "attaque_p95_ms": float(np.percentile(attack_lat, 95)) if attack_lat else None,
     }
-    json.dump({"laya": laya, "copies": rows, "latence": latence},
-              open(os.path.join(RESULTS_DIR, "metrics.json"), "w"), indent=2)
+    # Requêtes de l'attaque qui n'ont rien rapporté (bloquées par la défense...)
+    attaque = {"requetes_envoyees": budget_max, "requetes_bloquees": echecs,
+               "taux_blocage": echecs / budget_max if budget_max else 0.0}
+    json.dump({"etiquette": ETIQUETTE or "attaque_initiale", "laya": laya, "copies": rows,
+               "latence": latence, "attaque": attaque},
+              open(fichier_resultat("metrics", "json"), "w"), indent=2)
 
 
     # ---------------- Graphiques ----------------
+    if df.empty:
+        print("Aucune copie n'a pu être entraînée (trop peu de réponses) : pas de graphique.")
+        return
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(df["nb_requetes"], df["accord_avec_laya"], "o-", label="Accord copie / Laya")
     ax.plot(df["nb_requetes"], df["accuracy"], "s-", label="Accuracy de la copie")
@@ -272,17 +310,18 @@ def main():
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
     fig.tight_layout()
-    fig.savefig(os.path.join(RESULTS_DIR, "extraction_metrics.png"), dpi=150)
+    fig.savefig(fichier_resultat("extraction_metrics", "png"), dpi=150)
 
 
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.boxplot([baseline_lat, attack_lat], showfliers=False)
-    ax.set_xticks([1, 2], ["Normal (1 à la fois)", f"Pendant l'attaque ({N_WORKERS} threads)"])
-    ax.set_ylabel("Latence (ms)")
-    ax.set_title("Latence de l'API")
-    ax.grid(alpha=0.3, axis="y")
-    fig.tight_layout()
-    fig.savefig(os.path.join(RESULTS_DIR, "latence.png"), dpi=150)
+    if attack_lat:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.boxplot([baseline_lat, attack_lat], showfliers=False)
+        ax.set_xticks([1, 2], ["Normal (1 à la fois)", f"Pendant l'attaque ({N_WORKERS} threads)"])
+        ax.set_ylabel("Latence (ms)")
+        ax.set_title("Latence de l'API")
+        ax.grid(alpha=0.3, axis="y")
+        fig.tight_layout()
+        fig.savefig(fichier_resultat("latence", "png"), dpi=150)
 
 
     print("\nLaya (référence) :", {k: round(v, 3) for k, v in laya.items()})
