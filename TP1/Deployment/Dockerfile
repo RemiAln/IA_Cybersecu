@@ -15,6 +15,10 @@ RUN pip install --no-cache-dir torch==2.15.0 --index-url https://download.pytorc
 
 COPY requirements-api.txt .
 RUN pip install --no-cache-dir -r requirements-api.txt
+# Sécurité (TP2, étape 5) : pip et setuptools (installé avec torch) à jour,
+# sinon ils contiennent des failles connues (path traversal) signalées par
+# pip-audit et Trivy.
+RUN pip install --no-cache-dir --upgrade pip setuptools
 
 # Même arborescence que le projet : l'API s'importe comme Deployment.api
 # Code de l'API, fonction de nettoyage et modèle entraîné uniquement :

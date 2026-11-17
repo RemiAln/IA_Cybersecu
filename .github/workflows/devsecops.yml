@@ -114,6 +114,8 @@ jobs:
           python -m venv /tmp/api
           /tmp/api/bin/pip install -q torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
           /tmp/api/bin/pip install -q -r TP1/requirements-api.txt pip-audit
+          # Comme dans le Dockerfile : pip et setuptools (installé avec torch) à jour
+          /tmp/api/bin/pip install -q --upgrade pip setuptools
           /tmp/api/bin/pip-audit --desc | tee rapports/pip-audit.txt
 
       - name: Configuration Docker et Kubernetes (Trivy)
